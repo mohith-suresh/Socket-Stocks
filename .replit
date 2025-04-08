@@ -1,0 +1,34 @@
+modules = ["cpp"]
+
+[nix]
+channel = "stable-24_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Stock Trading System"
+
+[[workflows.workflow]]
+name = "Stock Trading System"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "make all && ./start_servers.sh"
+waitForPort = 45000
+
+[deployment]
+run = ["sh", "-c", "make all && ./start_servers.sh"]
