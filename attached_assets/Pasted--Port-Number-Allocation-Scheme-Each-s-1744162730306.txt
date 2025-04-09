@@ -1,0 +1,34 @@
+──────────────────────────────
+Port Number Allocation Scheme
+──────────────────────────────
+• Each server’s UDP port is based on a fixed base number plus the last three digits of your USC ID (often referred to as “xxx”). For instance, if your USC ID ends in 319, you’d calculate the port numbers as follows:
+  – Server A (Authentication Server): UDP port = 41000 + 319 = 41319
+  – Server P (Portfolio Server): UDP port = 42000 + 319 = 42319
+  – Server Q (Quote Server): UDP port = 43000 + 319 = 43319
+• The main server, Server M, uses two distinct ports:
+  – UDP Port for backend communications: It uses one static port computed as 44000 + xxx (so in our example, 44319). This single UDP port is shared when the main server communicates with all three backend servers.
+  – TCP Port for client communications: Server M’s TCP port is computed as 45000 + xxx (which would be 45319 in our example). Clients connect to Server M using TCP.
+• Clients, when they initiate a TCP connection with Server M, will be assigned dynamic port numbers by the operating system. However, these do not need to be hardcoded—instead, you should use the getsockname() function to retrieve the locally bound port number after the system assigns it dynamically.
+
+──────────────────────────────
+Testing Your Port Implementation
+──────────────────────────────
+To verify that your system is working as required:
+	1.	Set Up According to Your USC ID:
+ – Determine your “xxx” value (the last three digits of your USC ID).
+ – Confirm that all your servers use the calculated static UDP and TCP port numbers. For instance, if your USC ID is such that xxx = 319, ensure that:
+  • Server A listens on UDP port 41319
+  • Server P listens on UDP port 42319
+  • Server Q listens on UDP port 43319
+  • Server M uses UDP port 44319 for inter-server communication and TCP port 45319 for client communication.
+	2.	Run Your Test:
+ – Start your servers in the prescribed order: first Server M, then Server A, followed by Server P, and Server Q.
+ – Finally, start your client(s) which must connect to Server M over TCP on port 45000+xxx (e.g., 45319).
+	3.	Monitor On-Screen Outputs:
+ – The on-screen messages should clearly confirm that each server is bound to the correct port (they should display the port numbers in the boot-up messages).
+ – When clients connect, use debugging or appropriate on-screen messages to verify that the dynamic local port numbers (retrieved via getsockname()) match your expectations.
+	4.	Consistency:
+ – Ensure that your code does not hardcode any dynamic port numbers; instead, always use getsockname() for the client-side connection sockets.
+ – The host for all connections must be hard-coded as “localhost” or “127.0.0.1” per the project guidelines.
+
+In summary, the port requirements are strict: you must derive the static UDP and TCP port numbers from a base number plus the last three digits of your USC ID. Then, when testing, verify that each server is using its specified port and that the client establishes the proper TCP connection with Server M using the dynamically assigned port alongside the correct static port for Server M. This approach ensures uniformity and prevents port conflicts as described in the project requirements.

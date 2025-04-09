@@ -1,1 +1,7 @@
-user1 password1
+user1
+sdvv789
+position
+quote
+GOOG
+logout
+exit
