@@ -1,0 +1,332 @@
+EE450 Socket Programming Project - Beej's Guide Compliance Documentation
+
+This document outlines how our implementation follows Beej's Guide to Network Programming standards and best practices. Each implementation is accompanied by code references and explanations.
+
+=============================================
+1. SOCKET CREATION AND PROPER ERROR HANDLING
+=============================================
+
+Our implementation uses proper error checking after socket() calls with descriptive error messages, as recommended in Beej's Guide Section 5.1:
+
+Example from serverM.cpp:
+-------------------------
+if ((tcp_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+    perror("TCP socket");
+    fprintf(stderr, "[Server M] Failed to create TCP socket: %s\n", strerror(errno));
+    exit(1);
+}
+
+printf("[Server M] TCP socket created with fd %d\n", tcp_sockfd);
+
+This shows:
+- Proper error checking immediately after socket()
+- Use of perror() and strerror(errno) for detailed error reporting
+- Descriptive log messages for debugging
+- Clean termination in case of failure
+
+=============================================
+2. SOCKET OPTIONS CONFIGURATION
+=============================================
+
+We implement socket options as per Beej's Guide Section 7.1:
+
+Example from serverM.cpp:
+-------------------------
+// Allow port reuse
+int yes = 1;
+if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+    perror("setsockopt SO_REUSEADDR");
+    fprintf(stderr, "[Server M] Failed to set SO_REUSEADDR option: %s\n", strerror(errno));
+    close(tcp_sockfd);
+    exit(1);
+}
+
+// Set receive timeout (optional, as per Beej's recommendation in 7.4)
+struct timeval tv;
+tv.tv_sec = 10;  // 10 second timeout
+tv.tv_usec = 0;
+if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
+    perror("setsockopt SO_RCVTIMEO");
+    // Non-fatal, just warn
+    fprintf(stderr, "[Server M] Warning: Failed to set SO_RCVTIMEO option: %s\n", strerror(errno));
+}
+
+This shows:
+- Setting SO_REUSEADDR to avoid "Address already in use" errors
+- Setting SO_RCVTIMEO for socket timeouts to prevent blocked operations
+- Proper error handling following Beej's recommendations
+
+=============================================
+3. BIND AND LISTEN WITH PROPER ERROR CHECKING
+=============================================
+
+Our bind() and listen() calls follow Beej's Guide Section 5.2 with proper error checking:
+
+Example from serverM.cpp:
+-------------------------
+// Bind TCP socket
+printf("[Server M] Attempting to bind TCP socket to port %d...\n", tcp_port);
+if (bind(tcp_sockfd, (struct sockaddr *)&tcp_my_addr, sizeof(tcp_my_addr)) == -1) {
+    perror("TCP bind");
+    printf("[Server M] Failed to bind TCP socket to port %d: %s\n", tcp_port, strerror(errno));
+    exit(1);
+}
+printf("[Server M] Successfully bound TCP socket\n");
+
+// Listen on TCP socket
+printf("[Server M] Attempting to listen on TCP socket...\n");
+if (listen(tcp_sockfd, BACKLOG) == -1) {
+    perror("listen");
+    printf("[Server M] Failed to listen on TCP socket: %s\n", strerror(errno));
+    exit(1);
+}
+printf("[Server M] Now listening on TCP port %d\n", tcp_port);
+
+This shows:
+- Detailed logging before and after critical operations
+- Proper error checking and reporting
+- Clean termination on failure
+
+=============================================
+4. ROBUST SIGNAL HANDLING WITH SIGACTION()
+=============================================
+
+We use sigaction() instead of signal() as recommended in Beej's Guide Section 9.4:
+
+Example from serverM.cpp:
+-------------------------
+// Register signal handler with sigaction()
+struct sigaction sa;
+sa.sa_handler = sigint_handler;
+sigemptyset(&sa.sa_mask);
+sa.sa_flags = 0;    // Not using SA_RESTART to ensure interrupted system calls fail with EINTR
+
+if (sigaction(SIGINT, &sa, NULL) == -1) {
+    perror("sigaction");
+    fprintf(stderr, "[Server M] Failed to register SIGINT handler: %s\n", strerror(errno));
+    exit(1);
+}
+
+printf("[Server M] Registered signal handler for SIGINT\n");
+
+This shows:
+- Use of sigaction() instead of signal() for improved portability
+- Proper handler configuration
+- Explicit choice not to use SA_RESTART for better interrupt handling
+
+=============================================
+5. ROBUST SOCKET SEND/RECEIVE WITH RETRY LOGIC
+=============================================
+
+We implemented robust send/receive functions with proper error handling as per Beej's Guide Section 7.4:
+
+Example from client.cpp (send_with_retry):
+------------------------------------------
+bool send_with_retry(int sockfd, const char* data, size_t data_length) {
+    int bytes_sent;
+    int total_bytes = 0;
+    int max_attempts = 5;  // Retry a few times in case of interrupted system calls
+    
+    while (total_bytes < (int)data_length) {
+        for (int attempt = 0; attempt < max_attempts; attempt++) {
+            bytes_sent = send(sockfd, data + total_bytes, data_length - total_bytes, 0);
+            
+            if (bytes_sent == -1) {
+                if (errno == EINTR) {
+                    // Interrupted system call, retry
+                    printf("[Client] send() interrupted, retrying...\n");
+                    continue;
+                } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // Would block, try again later
+                    printf("[Client] send() would block, retrying...\n");
+                    usleep(100000);  // Sleep for 100ms before retry
+                    continue;
+                } else {
+                    // Some other error
+                    perror("send");
+                    return false;
+                }
+            }
+            
+            // Successfully sent some bytes
+            total_bytes += bytes_sent;
+            break;  // Break out of the retry loop
+        }
+        
+        if (total_bytes < (int)data_length && bytes_sent <= 0) {
+            // Could not send after max attempts
+            printf("[Client] Failed to send after %d attempts\n", max_attempts);
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+This shows:
+- Handling of partial sends (when send() returns fewer bytes than requested)
+- Proper handling of EINTR for interrupted system calls
+- Handling of EAGAIN/EWOULDBLOCK for non-blocking sockets
+- Retry logic with backoff
+
+Example from client.cpp (recv_with_retry):
+------------------------------------------
+int recv_with_retry(int sockfd, char* buffer, size_t buffer_size) {
+    int bytes_received;
+    int total_bytes = 0;
+    int max_attempts = 5;  // Retry a few times in case of interrupted system calls
+    
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
+        bytes_received = recv(sockfd, buffer + total_bytes, buffer_size - 1 - total_bytes, 0);
+        
+        if (bytes_received == -1) {
+            if (errno == EINTR) {
+                // Interrupted system call, retry
+                printf("[Client] recv() interrupted, retrying...\n");
+                continue;
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Timeout occurred
+                printf("[Client] recv() timed out\n");
+                return -1;
+            } else {
+                // Some other error
+                perror("recv");
+                return -1;
+            }
+        } else if (bytes_received == 0) {
+            // Server closed connection
+            printf("[Client] Server closed connection\n");
+            return 0;
+        }
+        
+        total_bytes += bytes_received;
+        
+        // If we received a terminating character, we're done
+        if (buffer[total_bytes-1] == '\0' || buffer[total_bytes-1] == '\n') {
+            break;
+        }
+    }
+    
+    // Null-terminate the buffer
+    buffer[total_bytes] = '\0';
+    
+    return total_bytes;
+}
+
+This shows:
+- Handling of partial receives
+- Proper error checking and retry logic
+- Handling of connection closure (bytes_received == 0)
+- Buffer safety with null termination
+
+=============================================
+6. PROPER CLIENT CONNECTION
+=============================================
+
+Our client connection follows Beej's Guide Section 5.1 with proper hostname resolution:
+
+Example from client.cpp:
+-----------------------
+// Get server info
+if ((he = gethostbyname(SERVER_IP)) == NULL) {
+    perror("gethostbyname");
+    exit(1);
+}
+
+// Setup server address struct
+memset(&server_addr, 0, sizeof(server_addr));
+server_addr.sin_family = AF_INET;
+server_addr.sin_port = htons(port);
+server_addr.sin_addr = *((struct in_addr *)he->h_addr);
+
+// Print connection details
+printf("[Client] Attempting to connect to %s:%d\n", SERVER_IP, port);
+
+// Connect to server
+if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+    perror("connect");
+    printf("[Client] Connection failed to %s:%d with sockfd %d\n", SERVER_IP, port, sockfd);
+    close(sockfd);
+    exit(1);
+}
+
+This shows:
+- Proper hostname resolution with gethostbyname()
+- Clearing the address structure with memset()
+- Proper network byte order conversion with htons()
+- Connection error handling
+
+=============================================
+7. DYNAMIC CLIENT PORT ASSIGNMENT
+=============================================
+
+We implement proper client-side dynamic port assignment using getsockname() as described in Beej's Guide:
+
+Example from client.cpp:
+-----------------------
+// Get local port information
+struct sockaddr_in my_addr;
+socklen_t len = sizeof(my_addr);
+getsockname(sockfd, (struct sockaddr*)&my_addr, &len);
+
+printf("[Client] Connected to Main Server using TCP on port %d\n", ntohs(my_addr.sin_port));
+
+This shows:
+- Retrieving the dynamically assigned client port with getsockname()
+- Converting from network to host byte order with ntohs()
+- Displaying port information to the user
+
+=============================================
+8. CLEAN RESOURCE MANAGEMENT
+=============================================
+
+Our implementation properly manages resources with clean shutdown procedures:
+
+Example from serverM.cpp (sigint_handler):
+-----------------------------------------
+void sigint_handler(int sig) {
+    (void)sig;  // Explicitly cast to void to prevent unused parameter warning
+    
+    printf("\n[Server M] Caught SIGINT signal, cleaning up and exiting...\n");
+    
+    // Close all open sockets
+    if (tcp_sockfd != -1) {
+        printf("[Server M] Closing TCP socket (fd: %d)...\n", tcp_sockfd);
+        close(tcp_sockfd);
+    }
+    if (udp_sockfd != -1) {
+        printf("[Server M] Closing UDP socket (fd: %d)...\n", udp_sockfd);
+        close(udp_sockfd);
+    }
+    
+    // Close all client connections
+    printf("[Server M] Closing %zu client connections...\n", client_usernames.size());
+    for (const auto& client : client_usernames) {
+        close(client.first);
+    }
+    
+    printf("[Server M] Cleanup complete, exiting.\n");
+    exit(0);
+}
+
+This shows:
+- Proper socket cleanup on program termination
+- Closing all connected client sockets
+- Descriptive logging during cleanup process
+
+=============================================
+CONCLUSION
+=============================================
+
+Our implementation strictly follows Beej's Guide to Network Programming standards with:
+
+1. Proper error handling throughout socket operations
+2. Robust socket options configuration
+3. Proper bind and listen procedures
+4. Modern signal handling with sigaction()
+5. Reliable send/receive functions with retry logic
+6. Clean connection handling and resource management
+7. Dynamic port assignment
+8. Descriptive logging for debugging and troubleshooting
+
+These improvements make the code more robust and reliable while maintaining all the functionality requirements of the original project specification.

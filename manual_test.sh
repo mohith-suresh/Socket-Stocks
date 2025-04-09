@@ -1,88 +1,182 @@
 #!/bin/bash
 
-# Colors for better output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Manual Test Script for EE450 Socket Programming Project
+# This script allows manual testing of specific client operations
 
-# Function to cleanup all processes on exit
-cleanup() {
-    echo -e "${YELLOW}Cleaning up server processes...${NC}"
-    pkill -f "./serverM" || true
-    pkill -f "./serverA" || true
-    pkill -f "./serverP" || true
-    pkill -f "./serverQ" || true
-    echo -e "${GREEN}Cleanup complete${NC}"
-    exit $1
-}
-
-# Set up trap to catch Ctrl+C
-trap 'cleanup 1' INT
-
-# Start servers in the correct order
-echo -e "${YELLOW}Starting Server M...${NC}"
-./serverM &
-sleep 1
-
-echo -e "${YELLOW}Starting Server A...${NC}"
-./serverA &
-sleep 1
-
-echo -e "${YELLOW}Starting Server P...${NC}"
-./serverP &
-sleep 1
-
-echo -e "${YELLOW}Starting Server Q...${NC}"
-./serverQ &
-sleep 1
+echo "====================================="
+echo "EE450 Stock Trading System Manual Test"
+echo "====================================="
 
 # Check if servers are running
-if ! pgrep -f "./serverM" > /dev/null; then
-    echo -e "${RED}Error: Server M failed to start.${NC}"
-    cleanup 1
+echo -e "\n[Step 1] Checking if servers are running..."
+SERVER_M_PID=$(pgrep -f "./serverM")
+SERVER_A_PID=$(pgrep -f "./serverA")
+SERVER_P_PID=$(pgrep -f "./serverP")
+SERVER_Q_PID=$(pgrep -f "./serverQ")
+
+if [[ -z "$SERVER_M_PID" || -z "$SERVER_A_PID" || -z "$SERVER_P_PID" || -z "$SERVER_Q_PID" ]]; then
+    echo "Servers not running. Starting them now..."
+    
+    # Kill any existing servers
+    pkill -f 'server[AMPQ]' 2>/dev/null || true
+    sleep 1
+    
+    # Start servers
+    echo "Starting Server M (Main)..."
+    ./serverM > serverM.log 2>&1 &
+    sleep 1
+    
+    echo "Starting Server A (Authentication)..."
+    ./serverA > serverA.log 2>&1 &
+    sleep 1
+    
+    echo "Starting Server P (Portfolio)..."
+    ./serverP > serverP.log 2>&1 &
+    sleep 1
+    
+    echo "Starting Server Q (Quote)..."
+    ./serverQ > serverQ.log 2>&1 &
+    sleep 1
+    
+    echo "All servers started!"
+else
+    echo "All servers are already running."
 fi
 
-if ! pgrep -f "./serverA" > /dev/null; then
-    echo -e "${RED}Error: Server A failed to start.${NC}"
-    cleanup 1
-fi
+# Display test options
+echo -e "\n[Step 2] Choose a test to run:"
+echo "1. Authentication Test (with valid credentials)"
+echo "2. Authentication Test (with invalid credentials)"
+echo "3. Portfolio View Test"
+echo "4. Stock Quote Test"
+echo "5. Buy Stock Test"
+echo "6. Sell Stock Test"
+echo "7. Error Handling Test (insufficient shares)"
+echo "8. Error Handling Test (invalid stock)"
+echo "9. Full Sequence Test"
+echo "0. Custom Test (enter your own commands)"
 
-if ! pgrep -f "./serverP" > /dev/null; then
-    echo -e "${RED}Error: Server P failed to start.${NC}"
-    cleanup 1
-fi
+# Get user choice
+read -p "Enter your choice (0-9): " choice
+echo
 
-if ! pgrep -f "./serverQ" > /dev/null; then
-    echo -e "${RED}Error: Server Q failed to start.${NC}"
-    cleanup 1
-fi
+case $choice in
+    1)
+        echo "Running Authentication Test (valid credentials)..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    2)
+        echo "Running Authentication Test (invalid credentials)..."
+        cat > test_login.txt << EOF
+user1
+wrongpassword
+EOF
+        ./client < test_login.txt
+        ;;
+    3)
+        echo "Running Portfolio View Test..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+position
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    4)
+        echo "Running Stock Quote Test..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+quote
+quote S1
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    5)
+        echo "Running Buy Stock Test..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+position
+buy S1 2
+yes
+position
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    6)
+        echo "Running Sell Stock Test..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+position
+sell S1 1
+yes
+position
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    7)
+        echo "Running Error Handling Test (insufficient shares)..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+position
+sell S1 1000
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    8)
+        echo "Running Error Handling Test (invalid stock)..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+quote NONEXISTENT
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    9)
+        echo "Running Full Sequence Test..."
+        cat > test_login.txt << EOF
+user1
+sdvv789
+position
+quote
+buy S1 3
+yes
+position
+sell S1 1
+yes
+position
+exit
+EOF
+        ./client < test_login.txt
+        ;;
+    0)
+        echo "Running Custom Test..."
+        echo "Enter your commands below (one per line). Press Ctrl+D when finished."
+        echo "First line should be username, second line password, and last line should be 'exit'."
+        cat > test_login.txt
+        echo "Running client with your custom commands..."
+        ./client < test_login.txt
+        ;;
+    *)
+        echo "Invalid choice. Exiting."
+        exit 1
+        ;;
+esac
 
-echo -e "${GREEN}All servers started successfully${NC}"
-
-# Display running processes
-echo -e "${YELLOW}Checking running server processes:${NC}"
-ps aux | grep -E "server[MAPQ]" | grep -v grep
-
-# Display test instructions
-echo -e "${GREEN}====================================================${NC}"
-echo -e "${BLUE}All servers are running. Now you can test manually.${NC}"
-echo -e "${BLUE}Use the following commands:${NC}"
-echo -e "${GREEN}./client${NC}"
-echo -e "${GREEN}====================================================${NC}"
-echo -e "${YELLOW}Test commands:${NC}"
-echo -e "${BLUE}1. Login with username: ${GREEN}user1${BLUE} password: ${GREEN}sdvv789${NC}"
-echo -e "${BLUE}2. Get all quotes: ${GREEN}quote${NC}"
-echo -e "${BLUE}3. Get specific quote: ${GREEN}quote S1${NC}"
-echo -e "${BLUE}4. Buy shares: ${GREEN}buy S1 5${BLUE} (confirm with ${GREEN}yes${BLUE})${NC}"
-echo -e "${BLUE}5. Check position: ${GREEN}position${NC}"
-echo -e "${BLUE}6. Sell shares: ${GREEN}sell S1 2${BLUE} (confirm with ${GREEN}yes${BLUE})${NC}"
-echo -e "${BLUE}7. Exit: ${GREEN}exit${NC}"
-echo -e "${GREEN}====================================================${NC}"
-
-# Keep servers running until user decides to end
-read -p "Press Enter to stop the servers..."
-
-# Cleanup when done
-cleanup 0
+echo -e "\nTest complete! Check the output above."
+echo "To run a different test, execute this script again."
+echo "To kill all server processes, run: pkill -f 'server[AMPQ]'"

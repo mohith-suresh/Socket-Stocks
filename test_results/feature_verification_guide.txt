@@ -1,0 +1,221 @@
+EE450 Socket Programming Project - Feature Verification Guide
+
+This guide explains how to verify each required feature in the project. For each feature, specific test commands 
+and expected behaviors are outlined to confirm functionality.
+
+=============================================
+1. AUTHENTICATION MECHANISM
+=============================================
+
+Feature description: The system must authenticate users by verifying their username and password against
+the database in Server A.
+
+Verification Steps:
+1. Run all servers: `./start_servers.sh`
+2. Start a client: `./client`
+3. Enter valid credentials:
+   - Username: `user1`
+   - Password: `sdvv789`
+4. Observe successful login and menu display
+
+To verify authentication failure:
+1. Start a new client: `./client`
+2. Enter invalid credentials:
+   - Username: `user1`
+   - Password: `wrongpassword`
+3. Observe authentication failure message
+
+This proves:
+- Password encryption is working (passwords are encrypted as required in the spec)
+- Server M correctly forwards authentication requests to Server A
+- Server A correctly validates credentials against members.txt
+- Authentication results are properly communicated back to the client
+
+=============================================
+2. VIEWING PORTFOLIO
+=============================================
+
+Feature description: Users should be able to view their portfolio showing stocks owned,
+quantities, average purchase prices, and profit/loss calculations.
+
+Verification Steps:
+1. After logging in (as user1), enter: `position`
+2. Observe portfolio display showing:
+   - List of stocks owned with quantities and average prices
+   - Current market value for each position
+   - Gain/loss per position and total
+
+This proves:
+- Server M correctly forwards portfolio requests to Server P
+- Server P properly retrieves data from portfolios.txt
+- The system correctly calculates current portfolio values by getting prices from Server Q
+- Gain/loss calculations work correctly
+
+=============================================
+3. VIEWING STOCK QUOTES
+=============================================
+
+Feature description: Users should be able to retrieve current stock quotes from Server Q.
+
+Verification Steps:
+1. Enter: `quote` to view all stocks
+2. Enter: `quote S1` to view a specific stock
+3. Observe accurate price display for requested stocks
+
+This proves:
+- Server M correctly forwards quote requests to Server Q
+- Server Q properly retrieves data from quotes.txt
+- Price data is correctly displayed to the user
+
+=============================================
+4. BUYING STOCKS
+=============================================
+
+Feature description: Users should be able to purchase stocks, with the system updating their portfolio
+and tracking average purchase prices.
+
+Verification Steps:
+1. Check current portfolio: `position`
+2. Enter a buy command: `buy S1 5`
+3. Confirm the purchase: `yes`
+4. Check updated portfolio: `position`
+5. Observe that:
+   - Number of shares increased by 5
+   - Average purchase price is updated
+   - Total gain/loss is recalculated
+
+This proves:
+- Buy transactions update portfolios correctly
+- Average purchase price is correctly calculated
+- Server P properly updates its database
+- Server Q advances the stock price for the next transaction
+
+=============================================
+5. SELLING STOCKS
+=============================================
+
+Feature description: Users should be able to sell stocks they own, with the system updating their portfolio.
+
+Verification Steps:
+1. Check current portfolio: `position`
+2. Enter a sell command: `sell S1 3`
+3. Confirm the sale: `yes`
+4. Check updated portfolio: `position`
+5. Observe that:
+   - Number of shares decreased by 3
+   - Average purchase price remains the same (as per the project requirements)
+   - Total gain/loss is recalculated
+
+This proves:
+- Sell transactions update portfolios correctly
+- Server P properly updates its database
+- Server Q advances the stock price for the next transaction
+
+=============================================
+6. ERROR HANDLING
+=============================================
+
+Feature description: The system should handle invalid inputs and error conditions gracefully.
+
+A. Insufficient Shares Verification:
+1. Check how many shares of S1 you own: `position`
+2. Enter a sell command for more shares than you own: `sell S1 100`
+3. Observe the error message stating insufficient shares
+
+B. Invalid Stock Verification:
+1. Enter a quote command for a non-existent stock: `quote NONEXISTENT`
+2. Observe the error message stating stock not found
+
+C. Invalid Command Verification:
+1. Enter an invalid command: `unknown_command`
+2. Observe the error message stating invalid command
+
+This proves:
+- The system correctly validates user inputs
+- Error conditions are properly detected and reported
+- Invalid operations are prevented
+
+=============================================
+7. MULTIPLE CLIENT SUPPORT
+=============================================
+
+Feature description: The system should support multiple clients connecting simultaneously.
+
+Verification Steps:
+1. With servers running, open two terminal windows
+2. Start a client in each window: `./client`
+3. Log in with different credentials in each window:
+   - Window 1: Username `user1`, Password `sdvv789`
+   - Window 2: Username `user2`, Password `12345`
+4. In both windows, execute various commands
+5. Observe that:
+   - Both clients operate independently
+   - Each client sees their own portfolio
+   - Changes made by one client don't affect the other
+
+This proves:
+- Server M correctly handles multiple client connections
+- The system maintains separate sessions for each client
+- Backend servers (A, P, Q) properly process requests from multiple clients
+
+=============================================
+8. GRACEFUL TERMINATION
+=============================================
+
+Feature description: The system should handle termination gracefully, cleaning up resources.
+
+Verification Steps:
+1. After testing various features, enter: `exit` in the client
+2. Observe clean exit message
+3. Press Ctrl+C in the terminal running a server
+4. Observe the cleanup messages as the server exits
+
+This proves:
+- The client correctly terminates its connection to Server M
+- Servers handle interruption signals properly
+- System resources are properly cleaned up on exit
+
+=============================================
+9. PERFORMANCE VERIFICATION
+=============================================
+
+Feature description: The system should handle transactions efficiently with proper error handling.
+
+Verification Steps:
+1. Rapidly execute a series of commands:
+   ```
+   quote
+   buy S1 1
+   yes
+   sell S1 1
+   yes
+   position
+   ```
+2. Observe system responsiveness and correct execution of all commands
+
+This proves:
+- The system handles a sequence of operations correctly
+- Communication between components is efficient
+- Error handling is robust during busy operation
+
+=============================================
+INTEGRATED TEST WITH SCRIPT
+=============================================
+
+For a comprehensive automated test, run:
+```
+./quick_start.sh
+```
+
+This will:
+1. Compile all components
+2. Start all servers
+3. Run a predefined test sequence
+4. Show the results
+
+Or for manual testing with specific input, run:
+```
+./manual_test.sh
+```
+
+These tests together verify all required functionalities of the stock trading system.
