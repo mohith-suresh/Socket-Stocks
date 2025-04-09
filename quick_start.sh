@@ -1,87 +1,136 @@
 #!/bin/bash
 
-# Quick Start Script for EE450 Socket Programming Project
-# This script compiles the project, starts all servers, and runs a simple test
+# Colors for terminal output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-echo "====================================="
-echo "EE450 Stock Trading System Quick Start"
-echo "====================================="
+# Print header
+echo -e "${BLUE}====================================================${NC}"
+echo -e "${BLUE}       EE450 Stock Trading System Quick Start       ${NC}"
+echo -e "${BLUE}====================================================${NC}"
 
-# 1. Compile all components
-echo -e "\n[Step 1] Compiling all components..."
-make all
-if [ $? -ne 0 ]; then
-    echo "Compilation failed! Please check the error messages above."
-    exit 1
-fi
-echo "Compilation successful!"
-
-# 2. Start servers
-echo -e "\n[Step 2] Starting all servers..."
-echo "Killing any existing server processes..."
-pkill -f 'server[AMPQ]' 2>/dev/null || true
-
-echo "Starting Server M (Main)..."
-./serverM > serverM.log 2>&1 &
-sleep 1
-
-echo "Starting Server A (Authentication)..."
-./serverA > serverA.log 2>&1 &
-sleep 1
-
-echo "Starting Server P (Portfolio)..."
-./serverP > serverP.log 2>&1 &
-sleep 1
-
-echo "Starting Server Q (Quote)..."
-./serverQ > serverQ.log 2>&1 &
-sleep 1
-
-# Verify servers are running
-echo "Verifying servers are running..."
-SERVER_M_PID=$(pgrep -f "./serverM")
-SERVER_A_PID=$(pgrep -f "./serverA")
-SERVER_P_PID=$(pgrep -f "./serverP")
-SERVER_Q_PID=$(pgrep -f "./serverQ")
-
-if [[ -z "$SERVER_M_PID" || -z "$SERVER_A_PID" || -z "$SERVER_P_PID" || -z "$SERVER_Q_PID" ]]; then
-    echo "Error: Some servers failed to start. Please check the log files."
-    exit 1
+# Compile all executables if needed
+if [ ! -f ./serverM ] || [ ! -f ./serverA ] || [ ! -f ./serverP ] || [ ! -f ./serverQ ] || [ ! -f ./client ]; then
+    echo -e "${YELLOW}Compiling project executables...${NC}"
+    make clean && make all
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Compilation failed! Please fix errors and try again.${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Compilation successful!${NC}"
 fi
 
-echo "All servers started successfully!"
-echo "Server M (Main) running with PID: $SERVER_M_PID"
-echo "Server A (Auth) running with PID: $SERVER_A_PID"
-echo "Server P (Portfolio) running with PID: $SERVER_P_PID"
-echo "Server Q (Quote) running with PID: $SERVER_Q_PID"
+# Display menu for different testing options
+echo -e "${YELLOW}Select a testing option:${NC}"
+echo -e "1) ${GREEN}Start all servers${NC} (for production/grading use)"
+echo -e "2) ${GREEN}Run single client test${NC} (automated test with predefined commands)"
+echo -e "3) ${GREEN}Run interactive client${NC} (manual testing)"
+echo -e "q) ${RED}Quit${NC}"
+read -p "Enter your choice [1-3 or q]: " choice
 
-# 3. Run a simple test with the client
-echo -e "\n[Step 3] Running a simple test with the client..."
-echo "Creating test input file..."
-cat > test_input.txt << EOF
+case $choice in
+    1)
+        echo -e "${YELLOW}Starting all servers...${NC}"
+        ./start_servers.sh
+        ;;
+    2)
+        echo -e "${YELLOW}Running automated client test...${NC}"
+        # First make sure no servers are running
+        pkill -f "./serverM" 2>/dev/null || true
+        pkill -f "./serverA" 2>/dev/null || true
+        pkill -f "./serverP" 2>/dev/null || true
+        pkill -f "./serverQ" 2>/dev/null || true
+        
+        # Start servers
+        ./serverM > serverM.log 2>&1 &
+        sleep 1
+        ./serverA > serverA.log 2>&1 &
+        sleep 1
+        ./serverP > serverP.log 2>&1 &
+        sleep 1
+        ./serverQ > serverQ.log 2>&1 &
+        sleep 1
+        
+        # Create test commands
+        echo -e "${BLUE}Creating test commands file...${NC}"
+        cat > test_commands.txt << EOF
 user1
 sdvv789
-position
 quote
 quote S1
+buy S1 5
+yes
+position
+sell S1 2
+yes
+position
 exit
 EOF
+        
+        # Run client with test commands
+        echo -e "${BLUE}Running client with test commands...${NC}"
+        ./client < test_commands.txt
+        
+        # Cleanup
+        echo -e "${YELLOW}Test complete. Cleaning up...${NC}"
+        pkill -f "./serverM" 2>/dev/null || true
+        pkill -f "./serverA" 2>/dev/null || true
+        pkill -f "./serverP" 2>/dev/null || true
+        pkill -f "./serverQ" 2>/dev/null || true
+        ;;
+    3)
+        echo -e "${YELLOW}Starting servers for interactive client testing...${NC}"
+        # First make sure no servers are running
+        pkill -f "./serverM" 2>/dev/null || true
+        pkill -f "./serverA" 2>/dev/null || true
+        pkill -f "./serverP" 2>/dev/null || true
+        pkill -f "./serverQ" 2>/dev/null || true
+        
+        # Start servers
+        ./serverM > serverM.log 2>&1 &
+        sleep 1
+        ./serverA > serverA.log 2>&1 &
+        sleep 1
+        ./serverP > serverP.log 2>&1 &
+        sleep 1
+        ./serverQ > serverQ.log 2>&1 &
+        sleep 1
+        
+        echo -e "${GREEN}Servers started successfully. Starting client...${NC}"
+        echo -e "${BLUE}-----------------------------------------------------${NC}"
+        echo -e "${BLUE}Available commands:${NC}"
+        echo -e " - Login with: ${GREEN}user1/sdvv789${NC} or ${GREEN}user2/sdvvzrug${NC} or ${GREEN}admin/vhfuhwsdvv${NC}"
+        echo -e " - ${GREEN}quote${NC} - List all stock quotes"
+        echo -e " - ${GREEN}quote S1${NC} - Get quote for stock S1"
+        echo -e " - ${GREEN}buy S1 5${NC} - Buy 5 shares of S1"
+        echo -e " - ${GREEN}sell S1 2${NC} - Sell 2 shares of S1"
+        echo -e " - ${GREEN}position${NC} - View your portfolio"
+        echo -e " - ${GREEN}exit${NC} - Exit client"
+        echo -e "${BLUE}-----------------------------------------------------${NC}"
+        
+        # Start client
+        ./client
+        
+        # Cleanup
+        echo -e "${YELLOW}Session complete. Cleaning up...${NC}"
+        pkill -f "./serverM" 2>/dev/null || true
+        pkill -f "./serverA" 2>/dev/null || true
+        pkill -f "./serverP" 2>/dev/null || true
+        pkill -f "./serverQ" 2>/dev/null || true
+        ;;
+    q|Q)
+        echo -e "${RED}Exiting...${NC}"
+        exit 0
+        ;;
+    *)
+        echo -e "${RED}Invalid option.${NC}"
+        exit 1
+        ;;
+esac
 
-echo "Running client with test input..."
-./client < test_input.txt > client_output.txt 2>&1
-
-# 4. Display results
-echo -e "\n[Step 4] Test Results:"
-echo "===== Client Output ====="
-cat client_output.txt
-echo "===== End Client Output ====="
-
-echo -e "\nTest complete! You can find more detailed logs in:"
-echo "- serverM.log"
-echo "- serverA.log"
-echo "- serverP.log"
-echo "- serverQ.log"
-echo "- client_output.txt"
-
-echo -e "\nTo kill all server processes, run: pkill -f 'server[AMPQ]'"
-echo "For more tests and functionality verification, please see README.md"
+echo -e "${GREEN}Done!${NC}"
+exit 0

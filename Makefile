@@ -8,31 +8,31 @@ CXXFLAGS = -Wall -Wextra -std=c++11
 all: client serverM serverA serverP serverQ
 
 client: client.cpp
-        $(CXX) $(CXXFLAGS) -o client client.cpp
+	$(CXX) $(CXXFLAGS) -o client client.cpp
 
 test_client: test_client.cpp
-        $(CXX) $(CXXFLAGS) -o test_client test_client.cpp
+	$(CXX) $(CXXFLAGS) -o test_client test_client.cpp
 
 serverM: serverM.cpp
-        $(CXX) $(CXXFLAGS) -o serverM serverM.cpp
+	$(CXX) $(CXXFLAGS) -o serverM serverM.cpp
 
 serverA: serverA.cpp
-        $(CXX) $(CXXFLAGS) -o serverA serverA.cpp
+	$(CXX) $(CXXFLAGS) -o serverA serverA.cpp
 
 serverP: serverP.cpp
-        $(CXX) $(CXXFLAGS) -o serverP serverP.cpp
+	$(CXX) $(CXXFLAGS) -o serverP serverP.cpp
 
 serverQ: serverQ.cpp
-        $(CXX) $(CXXFLAGS) -o serverQ serverQ.cpp
+	$(CXX) $(CXXFLAGS) -o serverQ serverQ.cpp
 
 clean:
-        rm -f client test_client serverM serverA serverP serverQ
+	rm -f client test_client serverM serverA serverP serverQ
 
 test: all
-        ./auto_test.sh
+	./auto_test.sh
 
 test_manual: all
-        ./simplified_test.sh
-        
+	./simplified_test.sh
+	
 menu: all
-        ./run_tests.sh
+	./run_tests.sh

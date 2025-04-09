@@ -13,42 +13,11 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Stock Trading System"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "All Servers"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "Main Server"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Auth Server"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Portfolio Server"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Quote Server"
-
-[[workflows.workflow]]
-name = "Stock Trading System"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "make all && ./start_servers.sh"
-waitForPort = 45000
 
 [[workflows.workflow]]
 name = "All Servers"
@@ -62,7 +31,7 @@ task = "packager.installForAll"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash -c \"pkill -f 'server[AMPQ]' 2>/dev/null; ./serverM & ./serverA & ./serverP & ./serverQ & while true; do sleep 10; done\""
+args = "bash -c \"chmod +x ./start_servers.sh && ./start_servers.sh\""
 
 [[workflows.workflow]]
 name = "Main Server"
@@ -77,48 +46,6 @@ task = "packager.installForAll"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "./serverM"
-
-[[workflows.workflow]]
-name = "Auth Server"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "./serverA"
-
-[[workflows.workflow]]
-name = "Portfolio Server"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "./serverP"
-
-[[workflows.workflow]]
-name = "Quote Server"
-author = "agent"
-
-[workflows.workflow.metadata]
-agentRequireRestartOnSave = false
-
-[[workflows.workflow.tasks]]
-task = "packager.installForAll"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "./serverQ"
 
 [deployment]
 run = ["sh", "-c", "make all && ./start_servers.sh"]

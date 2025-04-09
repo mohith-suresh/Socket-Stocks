@@ -1,0 +1,12 @@
+user1
+sdvv789
+position
+quote
+quote S1
+buy S1 5
+yes
+position
+sell S1 3
+yes
+position
+exit
