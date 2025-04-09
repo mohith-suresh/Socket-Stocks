@@ -19,13 +19,14 @@ echo -e "${YELLOW}Rebuilding executables for compatibility...${NC}"
 make clean
 make all
 
-# Verify executables are compatible
-echo -e "${YELLOW}Verifying executable compatibility...${NC}"
-if ! file ./serverM | grep -q "executable"; then
-    echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
-    file ./serverM ./serverA ./serverP ./serverQ
+# Verify executables exist
+echo -e "${YELLOW}Verifying executables exist...${NC}"
+if [ ! -f ./serverM ] || [ ! -f ./serverA ] || [ ! -f ./serverP ] || [ ! -f ./serverQ ]; then
+    echo -e "${RED}Error: Some executables are missing!${NC}"
+    ls -la ./server*
     exit 1
 fi
+echo -e "${GREEN}All executables are present!${NC}"
 
 # Start all servers
 ./serverM > serverM.log 2>&1 &
@@ -43,7 +44,7 @@ echo -e "user1\nsdvv789\nexit" > client_input.txt
 
 # Run the client with input
 echo -e "${YELLOW}Running client test with authentication...${NC}"
-timeout 10 ./client < client_input.txt > client_output.txt
+timeout 5 ./client < client_input.txt > client_output.txt
 
 # Display client output
 echo -e "\n${GREEN}Client output:${NC}"

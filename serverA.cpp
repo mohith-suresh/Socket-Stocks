@@ -187,7 +187,13 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
     std::string msg(message);
     std::vector<std::string> parts = split_string(msg, ' ');
     
+    printf("[Server A] Processing message: '%s' (length: %zu)\n", message, strlen(message));
+    printf("[Server A] Received from %s:%d\n", 
+           inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
+    printf("[Server A] Parsed into %zu parts\n", parts.size());
+    
     if (parts.size() < 1) {
+        printf("[Server A] Warning: Message has no parts, ignoring\n");
         return;
     }
     
@@ -196,7 +202,8 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
         std::string username = parts[1];
         std::string password = parts[2];
         
-        printf("[Server A] Received username %s and password ******.\n", username.c_str());
+        printf("[Server A] Received AUTH request for username '%s' with password '%s'\n", 
+               username.c_str(), password.c_str());
         
         // Convert username to lowercase for case-insensitive comparison
         std::string lowercase_username = username;
@@ -207,6 +214,7 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
         // Check if user exists and password matches
         bool authenticated = false;
         
+        printf("[Server A] Checking against %zu stored credentials\n", users.size());
         for (const auto& user : users) {
             std::string stored_username = user.first;
             
@@ -216,8 +224,12 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
                 c = tolower(c);
             }
             
+            printf("[Server A] Checking against user '%s' with stored encrypted password '%s'\n", 
+                   stored_username.c_str(), user.second.c_str());
+            
             if (lowercase_username == lowercase_stored && password == user.second) {
                 authenticated = true;
+                printf("[Server A] Match found!\n");
                 break;
             }
         }
@@ -229,13 +241,33 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
             printf("[Server A] Member %s has been authenticated.\n", username.c_str());
         } else {
             response = "AUTH_FAILED";
-            printf("[Server A] The username %s or password ****** is incorrect.\n", username.c_str());
+            printf("[Server A] The username %s or password '%s' is incorrect.\n", 
+                  username.c_str(), password.c_str());
         }
         
-        if (sendto(sockfd, response, strlen(response), 0,
-                 (struct sockaddr *)client_addr, client_len) == -1) {
+        printf("[Server A] Sending response '%s' to %s:%d\n", 
+               response, inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
+        
+        // Make sure to include the null terminator
+        size_t response_len = strlen(response) + 1; // +1 for null terminator
+        char* null_term_response = new char[response_len];
+        strcpy(null_term_response, response);
+        
+        printf("[Server A] Message with null: '%s' (length: %zu)\n", null_term_response, response_len);
+        
+        int send_result = sendto(sockfd, null_term_response, response_len, 0,
+                             (struct sockaddr *)client_addr, client_len);
+        if (send_result == -1) {
             perror("sendto");
+            printf("[Server A] Failed to send response: %s\n", strerror(errno));
+        } else {
+            printf("[Server A] Successfully sent %d bytes (including null terminator)\n", send_result);
         }
+        
+        delete[] null_term_response;
+    } else {
+        printf("[Server A] Received unknown message type: %s (parts: %zu)\n", 
+               parts[0].c_str(), parts.size());
     }
 }
 

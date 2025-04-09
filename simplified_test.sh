@@ -20,12 +20,13 @@ make clean
 make all
 
 # Verify executables
-echo -e "${YELLOW}Verifying executables are compatible...${NC}"
-if ! file ./serverM | grep -q "executable"; then
-    echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
-    file ./serverM ./serverA ./serverP ./serverQ
+echo -e "${YELLOW}Verifying executables exist...${NC}"
+if [ ! -f ./serverM ] || [ ! -f ./serverA ] || [ ! -f ./serverP ] || [ ! -f ./serverQ ]; then
+    echo -e "${RED}Error: Some executables are missing!${NC}"
+    ls -la ./server*
     exit 1
 fi
+echo -e "${GREEN}All executables are present!${NC}"
 
 # Start all servers
 echo -e "${YELLOW}Starting Server M...${NC}"

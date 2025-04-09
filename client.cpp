@@ -151,26 +151,37 @@ bool authenticate(int sockfd) {
     
     printf("[Client] Enter username: ");
     std::getline(std::cin, username);
+    printf("[Client] Username received: %s\n", username.c_str());
     
     printf("[Client] Enter password: ");
     std::getline(std::cin, password);
+    printf("[Client] Password received (length: %zu)\n", password.length());
     
     // Create authentication message
     std::string auth_msg = "AUTH " + username + " " + password;
+    printf("[Client] Sending auth message: AUTH %s ******\n", username.c_str());
+    printf("[Client] Auth message length: %zu bytes\n", auth_msg.length());
     
     // Send credentials to server using our robust helper
     if (!send_with_retry(sockfd, auth_msg.c_str(), auth_msg.length())) {
+        printf("[Client] Failed to send authentication message\n");
         return false;
     }
+    printf("[Client] Auth message sent successfully, waiting for response...\n");
     
     // Get response using our robust helper function
+    printf("[Client] Attempting to receive auth response...\n");
     int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
     
     if (bytes_received <= 0) {
+        printf("[Client] No valid authentication response received (bytes: %d)\n", bytes_received);
         // Error already reported by recv_with_retry
         return false;
     }
+    
+    buffer[bytes_received] = '\0'; // Ensure null termination
     std::string response(buffer);
+    printf("[Client] Received auth response: %s (bytes: %d)\n", response.c_str(), bytes_received);
     
     if (response == "AUTH_SUCCESS") {
         printf("[Client] You have been granted access.\n");
@@ -285,9 +296,20 @@ void process_command(int sockfd, const std::string& cmd) {
     }
     else {
         // Unknown command or incorrect format
-        int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
-        if (bytes_received <= 0) return;
-        printf("%s\n", buffer);
+        printf("[Client] ERROR: Unknown command or invalid format: '%s'\n", cmd.c_str());
+        printf("[Client] Please try one of the available commands.\n");
+        
+        // Check if the server sent any response
+        struct timeval tv;
+        tv.tv_sec = 1;  // 1 second timeout
+        tv.tv_usec = 0;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        
+        int bytes_received = recv(sockfd, buffer, BUFFER_SIZE - 1, 0);
+        if (bytes_received > 0) {
+            buffer[bytes_received] = '\0';
+            printf("[Client] Server response: %s\n", buffer);
+        }
     }
 }
 
@@ -353,9 +375,20 @@ bool send_with_retry(int sockfd, const char* data, size_t data_length) {
     int total_bytes = 0;
     int max_attempts = 5;  // Retry a few times in case of interrupted system calls
     
-    while (total_bytes < (int)data_length) {
+    // Create a properly null-terminated string (even if already null-terminated)
+    char* null_terminated_data = new char[data_length + 1];
+    memcpy(null_terminated_data, data, data_length);
+    null_terminated_data[data_length] = '\0';
+    
+    printf("[Client] Sending data: '%s' (length: %zu + null = %zu bytes)\n", 
+           null_terminated_data, data_length, data_length + 1);
+    
+    // Include null terminator in the send operation
+    size_t full_length = data_length + 1;
+    
+    while (total_bytes < (int)full_length) {
         for (int attempt = 0; attempt < max_attempts; attempt++) {
-            bytes_sent = send(sockfd, data + total_bytes, data_length - total_bytes, 0);
+            bytes_sent = send(sockfd, null_terminated_data + total_bytes, full_length - total_bytes, 0);
             
             if (bytes_sent == -1) {
                 if (errno == EINTR) {
@@ -370,6 +403,7 @@ bool send_with_retry(int sockfd, const char* data, size_t data_length) {
                 } else {
                     // Some other error
                     perror("send");
+                    delete[] null_terminated_data;
                     return false;
                 }
             }
@@ -379,11 +413,13 @@ bool send_with_retry(int sockfd, const char* data, size_t data_length) {
         }
         
         // If we still haven't made progress after all attempts
-        if (total_bytes < (int)data_length && bytes_sent <= 0) {
+        if (total_bytes < (int)full_length && bytes_sent <= 0) {
             printf("[Client] Failed to send data after multiple attempts\n");
+            delete[] null_terminated_data;
             return false;
         }
     }
     
+    delete[] null_terminated_data;
     return true;
 }

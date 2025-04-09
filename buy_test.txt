@@ -1,4 +1,5 @@
 user1
 sdvv789
-foobar
+buy S1 5
+yes
 exit

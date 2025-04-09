@@ -1,52 +1,64 @@
 # Stock Trading System
 
-A high-performance stock trading system with advanced distributed networking capabilities, designed for robust and secure real-time trading operations.
+## Project Overview
 
-## System Architecture
+This project implements a distributed stock trading system using C++ socket programming. The system consists of a client application and four server components that communicate through TCP and UDP sockets to provide stock trading functionalities.
 
-The system consists of four servers:
+### System Architecture
 
-1. **Main Server (Server M)** - Central hub that connects to clients via TCP and backend servers via UDP
-2. **Authentication Server (Server A)** - Handles user authentication 
-3. **Portfolio Server (Server P)** - Manages user portfolio data
-4. **Quote Server (Server Q)** - Provides stock price quotes
+- **Client**: Communicates with Server M via TCP connection
+- **Server M (Main Server)**: Central hub that connects to clients via TCP and to backend servers via UDP
+- **Server A (Authentication Server)**: Handles user authentication requests via UDP
+- **Server P (Portfolio Server)**: Manages user portfolio information via UDP
+- **Server Q (Quote Server)**: Provides stock quote information via UDP
 
-## Port Allocation
+### Port Allocation Scheme
 
-- Server M: 45000 (TCP), 44000 (UDP)
-- Server A: 41000 (UDP)
-- Server P: 42000 (UDP)
-- Server Q: 43000 (UDP)
+- **Server M**: TCP port 45000, UDP port 44000
+- **Server A**: UDP port 41000
+- **Server P**: UDP port 42000
+- **Server Q**: UDP port 43000
 
-## Key Features
+## Features
 
-- Multi-server microservice architecture
-- Low-level socket programming with strict adherence to Beej's Guide standards
-- Secure authentication
-- Real-time stock price quotes
-- Portfolio management
+- **User Authentication**: Secure login with username/password verification
+- **Stock Quotes**: Retrieve pricing information for all stocks or specific stocks
+- **Portfolio Management**: View portfolio positions with current market values
+- **Trading Operations**: Buy and sell stocks with real-time price quotes
+- **Robust Communication**: Reliable message passing with error handling and retry logic
 
-## Beej's Guide Compliance
+## Technical Implementation
 
-This implementation strictly follows Beej's Guide to Network Programming standards:
+- **Socket Programming**: Uses Beej's Guide to Network Programming best practices
+- **Error Handling**: Comprehensive error management with perror() and cleanup routines
+- **Signal Handling**: Proper SIGINT handling with sigaction()
+- **Message Passing**: Robust send/receive functions with timeout and retry mechanisms
+- **Resource Management**: Proper socket cleanup and memory management
 
-- Proper socket creation, connection, binding, and error handling
-- Correct memory management and resource cleanup
-- Signal handling with sigaction
-- Robust send/receive wrappers to handle partial sends/receives
-- Appropriate socket options (SO_REUSEADDR, timeouts)
+## Getting Started
 
-## Running the System
+### Compilation
 
-### Starting All Servers
+Use the provided Makefile to compile all components:
 
 ```bash
+make clean all
+```
+
+This will compile the client and all server components.
+
+### Starting the Servers
+
+Use the provided startup script to launch all server components:
+
+```bash
+chmod +x start_servers.sh
 ./start_servers.sh
 ```
 
-This script starts all four servers (M, A, P, Q) and keeps them running.
-
 ### Running the Client
+
+After starting the servers, run the client:
 
 ```bash
 ./client
@@ -60,34 +72,49 @@ This script starts all four servers (M, A, P, Q) and keeps them running.
 
 ## Available Commands
 
-After authentication, the client supports the following commands:
+Once authenticated, the following commands are available:
 
-- `position` - View your current portfolio
-- `quote` - Get quotes for all stocks
-- `quote S1` - Get quote for a specific stock (e.g., S1)
-- `buy S1 5` - Buy 5 shares of stock S1
-- `sell S1 2` - Sell 2 shares of stock S1
-- `exit` - Exit the client
+- `quote`: Show all stock prices
+- `quote <stock>`: Show specific stock price
+- `buy <stock> <shares>`: Buy shares of a stock
+- `sell <stock> <shares>`: Sell shares of a stock
+- `position`: View your current portfolio
+- `exit`: Logout and exit
 
 ## Testing
 
-Several test scripts are provided:
+Several test scripts are provided to verify system functionality:
 
-- `./manual_auth_test.sh` - Interactive test for manual authentication verification
-- `./quick_test.sh` - Automated test suite that runs a predefined set of commands
-- `./simplified_test.sh` - Basic server startup verification
-- `./comprehensive_test.sh` - Complete system test with all functionality
+- `quick_test.sh`: Performs a basic authentication and quote retrieval test
+- `auth_only_test.sh`: Tests authentication functionality only
+- `quote_test.sh`: Tests stock quote retrieval functionality
+- `debug_auth_test.sh`: Detailed authentication test with logging
+- `comprehensive_test.sh`: Full system test with all functionalities
+
+## Test Results
+
+See the `test_results` directory for detailed test results and Beej's Guide compliance reports:
+
+- `test_results/test_summary.txt`: Summary of all test results
+- `test_results/beejs_compliance_summary.txt`: Detailed report on Beej's Guide compliance
 
 ## Implementation Notes
 
-1. The system uses a distributed architecture where each server performs a specialized task
-2. Authentication is handled securely with password encryption
-3. All network communication follows Beej's Guide standards for reliability and security
-4. Error handling is comprehensive throughout the codebase
-5. Memory management is carefully implemented to prevent leaks
+- All network messages are properly null-terminated for reliable transmission
+- Robust error handling and retry logic for network operations
+- Proper resource cleanup to prevent memory leaks and socket exhaustion
+- Signal handling for graceful server shutdown
+- Socket options configured for optimal reliability
 
-## Data Files
+## Project Files
 
-- `members.txt` - User credentials
-- `portfolios.txt` - User stock holdings
-- `quotes.txt` - Stock price information
+- `client.cpp`: Client application source
+- `serverM.cpp`: Main server implementation
+- `serverA.cpp`: Authentication server implementation
+- `serverP.cpp`: Portfolio server implementation
+- `serverQ.cpp`: Quote server implementation
+- `Makefile`: Compilation rules for all components
+- `members.txt`: User credentials database
+- `portfolios.txt`: User portfolio database
+- `quotes.txt`: Stock quote database
+- `*.sh`: Various test and utility scripts

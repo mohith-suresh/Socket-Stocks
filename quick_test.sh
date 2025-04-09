@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Quick test script that assumes servers are already running
 # Colors for better output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -9,46 +8,62 @@ NC='\033[0m' # No Color
 
 echo -e "${YELLOW}==== Stock Trading System Quick Test ====${NC}"
 
-# Check if servers are running
-if ! pgrep -f "serverM" > /dev/null; then
-    echo -e "${RED}Servers are not running.${NC}"
-    echo -e "${YELLOW}Starting servers automatically...${NC}"
+# Check if servers are already running
+echo -e "${YELLOW}Checking for existing server processes...${NC}"
+pgrep -f "server[MAPQ]" > /dev/null
+if [ $? -ne 0 ]; then
+    echo -e "${YELLOW}Starting servers...${NC}"
+    # Start servers in the background
+    ./start_servers.sh > /dev/null 2>&1 &
+    SERVER_PID=$!
     
-    # Force clean rebuild
-    make clean
-    make all
-    
-    # Verify executables
-    if ! file ./serverM | grep -q "executable"; then
-        echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
-        file ./serverM ./serverA ./serverP ./serverQ
-        exit 1
-    fi
-    
-    # Start servers
-    ./serverM > serverM.log 2>&1 &
-    sleep 1
-    ./serverA > serverA.log 2>&1 &
-    sleep 1
-    ./serverP > serverP.log 2>&1 &
-    sleep 1
-    ./serverQ > serverQ.log 2>&1 &
-    sleep 1
-    
-    if ! pgrep -f "serverM" > /dev/null; then
-        echo -e "${RED}Failed to start servers. Check the logs for details.${NC}"
-        exit 1
-    fi
+    # Wait for servers to start
+    echo -e "${YELLOW}Waiting for servers to initialize...${NC}"
+    for i in {1..5}; do
+        echo -n "."
+        sleep 1
+    done
+    echo ""
 fi
 
-echo -e "${GREEN}Servers detected as running!${NC}"
+# Create test input
+echo -e "${YELLOW}Preparing test input...${NC}"
+cat > test_input.txt << EOF
+user1
+sdvv789
+quote
+quote S1
+exit
+EOF
 
-# Test with automated commands
-echo -e "${YELLOW}Running automated client tests...${NC}"
-./client < test_commands.txt > test_output.txt
+# Run quick test
+echo -e "${YELLOW}Running quick test...${NC}"
+timeout 10 ./client < test_input.txt > test_output.txt
 
-# Display test results
-echo -e "\n${GREEN}Test Results:${NC}"
+# Check results
+echo -e "${YELLOW}Checking results...${NC}"
+if grep -q "You have been granted access" test_output.txt; then
+    echo -e "${GREEN}✓ Authentication successful${NC}"
+    AUTH_RESULT="PASS"
+else
+    echo -e "${RED}✗ Authentication failed${NC}"
+    AUTH_RESULT="FAIL"
+fi
+
+if grep -q "S1" test_output.txt && grep -q "S2" test_output.txt; then
+    echo -e "${GREEN}✓ All quotes displayed correctly${NC}"
+    ALL_QUOTES_RESULT="PASS"
+else
+    echo -e "${RED}✗ All quotes display failed${NC}"
+    ALL_QUOTES_RESULT="FAIL"
+fi
+
+# Overall result
+echo -e "\n${YELLOW}Test Summary:${NC}"
+echo -e "Authentication: ${AUTH_RESULT}"
+echo -e "All Quotes: ${ALL_QUOTES_RESULT}"
+
+echo -e "\n${YELLOW}Client Output:${NC}"
 cat test_output.txt
 
-echo -e "\n${GREEN}Test completed!${NC}"
+echo -e "\n${YELLOW}Test complete!${NC}"

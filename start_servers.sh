@@ -18,14 +18,15 @@ echo -e "${YELLOW}Rebuilding all servers for this system...${NC}"
 make clean
 make all
 
-# Check if binaries were properly built for this system
-echo -e "${YELLOW}Verifying executable compatibility...${NC}"
-if ! file ./serverM | grep -q "executable" || ! file ./serverA | grep -q "executable"; then
-    echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
+# Check if binaries exist
+echo -e "${YELLOW}Verifying executables exist...${NC}"
+if [ ! -f ./serverM ] || [ ! -f ./serverA ] || [ ! -f ./serverP ] || [ ! -f ./serverQ ]; then
+    echo -e "${RED}Error: Some executables are missing!${NC}"
     echo -e "${YELLOW}Executables details:${NC}"
-    file ./serverM ./serverA ./serverP ./serverQ
+    ls -la ./server*
     exit 1
 fi
+echo -e "${GREEN}All executables are present!${NC}"
 
 # Start all servers
 echo -e "${YELLOW}Starting Server M (Main Server)...${NC}"

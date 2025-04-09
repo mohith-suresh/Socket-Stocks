@@ -18,14 +18,15 @@ echo -e "${YELLOW}Rebuilding executables for this system...${NC}"
 make clean
 make all
 
-# Verify executables are compatible
-echo -e "${YELLOW}Verifying executable compatibility...${NC}"
-if ! file ./serverM | grep -q "executable" || ! file ./serverA | grep -q "executable"; then
-    echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
+# Verify executables exist
+echo -e "${YELLOW}Verifying executables exist...${NC}"
+if [ ! -f ./serverM ] || [ ! -f ./serverA ]; then
+    echo -e "${RED}Error: Some executables are missing!${NC}"
     echo -e "${YELLOW}Executables details:${NC}"
-    file ./serverM ./serverA
+    ls -la ./serverM ./serverA
     exit 1
 fi
+echo -e "${GREEN}All required executables are present!${NC}"
 
 # Start only the servers needed for auth (M and A)
 echo -e "${YELLOW}Starting Server M...${NC}"

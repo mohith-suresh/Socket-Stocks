@@ -310,7 +310,8 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     struct sockaddr_in server_a_addr;
     char buffer[BUFFER_SIZE];
     
-    printf("[Server M] Received authentication request for user %s\n", username.c_str());
+    printf("[Server M] Received authentication request for user %s with password length %zu\n", 
+           username.c_str(), password.length());
     
     // Encrypt password
     char enc_pass[BUFFER_SIZE];
@@ -318,27 +319,44 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     enc_pass[BUFFER_SIZE - 1] = '\0';
     encrypt_password(enc_pass);
     
-    printf("[Server M] Encrypted password for authentication\n");
+    printf("[Server M] Encrypted password for authentication: %s\n", enc_pass);
     
     // Prepare message for Server A
     std::string auth_message = "AUTH " + username + " " + enc_pass;
+    printf("[Server M] Prepared auth message for Server A: %s (length: %zu)\n", 
+           auth_message.c_str(), auth_message.length());
     
     // Set up address for Server A
     memset(&server_a_addr, 0, sizeof(server_a_addr));
     server_a_addr.sin_family = AF_INET;
     server_a_addr.sin_port = htons(SERVER_A_PORT);
     server_a_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    printf("[Server M] Server A address set to %s:%d\n", SERVER_IP, SERVER_A_PORT);
     
-    // Send to Server A
-    if (sendto(udp_sockfd, auth_message.c_str(), auth_message.length(), 0,
-              (struct sockaddr *)&server_a_addr, sizeof(server_a_addr)) == -1) {
+    // Send to Server A (include null terminator in length)
+    printf("[Server M] Sending auth message to Server A...\n");
+    // Make sure to include the null terminator
+    size_t full_length = auth_message.length() + 1; // +1 for null terminator
+    char* null_term_msg = new char[full_length];
+    strcpy(null_term_msg, auth_message.c_str());
+    
+    printf("[Server M] Message with null: '%s' (length: %zu)\n", null_term_msg, full_length);
+    
+    int send_result = sendto(udp_sockfd, null_term_msg, full_length, 0,
+                          (struct sockaddr *)&server_a_addr, sizeof(server_a_addr));
+    if (send_result == -1) {
         perror("sendto Server A");
+        printf("[Server M] Failed to send auth message to Server A: %s\n", strerror(errno));
         const char* error_msg = "AUTH_FAILED";
         send(client_sockfd, error_msg, strlen(error_msg), 0);
+        delete[] null_term_msg;
         return false;
     }
+    printf("[Server M] Successfully sent %d bytes to Server A\n", send_result);
+    delete[] null_term_msg;
     
     // Receive response from Server A
+    printf("[Server M] Waiting for response from Server A...\n");
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
     int bytes_received;
@@ -346,23 +364,58 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     if ((bytes_received = recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0,
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
         perror("recvfrom Server A");
+        printf("[Server M] Failed to receive response from Server A: %s\n", strerror(errno));
         const char* error_msg = "AUTH_FAILED";
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return false;
     }
     
     buffer[bytes_received] = '\0';
+    printf("[Server M] Received %d bytes from %s:%d: %s\n", 
+           bytes_received, 
+           inet_ntoa(from_addr.sin_addr), 
+           ntohs(from_addr.sin_port),
+           buffer);
     
     // Process Server A's response
     if (strcmp(buffer, "AUTH_SUCCESS") == 0) {
         printf("[Server M] Authentication successful for user %s\n", username.c_str());
         const char* success_msg = "AUTH_SUCCESS";
-        send(client_sockfd, success_msg, strlen(success_msg), 0);
+        printf("[Server M] Sending AUTH_SUCCESS to client (fd: %d)\n", client_sockfd);
+        
+        // Make sure to send null-terminated string
+        size_t msg_len = strlen(success_msg) + 1; // +1 for null terminator
+        char* null_term_response = new char[msg_len];
+        strcpy(null_term_response, success_msg);
+        
+        int send_res = send(client_sockfd, null_term_response, msg_len, 0);
+        if (send_res == -1) {
+            perror("send to client");
+            printf("[Server M] Failed to send AUTH_SUCCESS to client: %s\n", strerror(errno));
+            delete[] null_term_response;
+            return false;
+        }
+        printf("[Server M] Successfully sent %d bytes to client\n", send_res);
+        delete[] null_term_response;
         return true;
     } else {
         printf("[Server M] Authentication failed for user %s\n", username.c_str());
         const char* error_msg = "AUTH_FAILED";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        printf("[Server M] Sending AUTH_FAILED to client (fd: %d)\n", client_sockfd);
+        
+        // Make sure to send null-terminated string
+        size_t msg_len = strlen(error_msg) + 1; // +1 for null terminator
+        char* null_term_response = new char[msg_len];
+        strcpy(null_term_response, error_msg);
+        
+        int send_res = send(client_sockfd, null_term_response, msg_len, 0);
+        if (send_res == -1) {
+            perror("send to client");
+            printf("[Server M] Failed to send AUTH_FAILED to client: %s\n", strerror(errno));
+        } else {
+            printf("[Server M] Successfully sent %d bytes to client\n", send_res);
+        }
+        delete[] null_term_response;
         return false;
     }
 }
@@ -413,14 +466,25 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
     
     buffer[bytes_received] = '\0';
     
-    // Forward response to client
-    send(client_sockfd, buffer, bytes_received, 0);
+    // Forward response to client with null terminator
+    size_t resp_len = strlen(buffer) + 1; // +1 for null terminator
+    char* null_term_resp = new char[resp_len];
+    strcpy(null_term_resp, buffer);
+    
+    int send_res = send(client_sockfd, null_term_resp, resp_len, 0);
+    if (send_res == -1) {
+        perror("send quote result to client");
+    } else {
+        printf("[Server M] Successfully sent %d bytes of quote data\n", send_res);
+    }
+    delete[] null_term_resp;
 }
 
 void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares) {
     if (client_usernames.find(client_sockfd) == client_usernames.end()) {
         const char* error_msg = "ERROR: Not authenticated";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        // Include null terminator
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0);
         return;
     }
     
@@ -438,14 +502,20 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     server_q_addr.sin_port = htons(SERVER_Q_PORT);
     server_q_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
-    // Send to Server Q
-    if (sendto(udp_sockfd, quote_message.c_str(), quote_message.length(), 0,
+    // Send to Server Q (include null terminator)
+    size_t quote_len = quote_message.length() + 1;
+    char* null_term_quote = new char[quote_len];
+    strcpy(null_term_quote, quote_message.c_str());
+    
+    if (sendto(udp_sockfd, null_term_quote, quote_len, 0,
               (struct sockaddr *)&server_q_addr, sizeof(server_q_addr)) == -1) {
         perror("sendto Server Q");
         const char* error_msg = "ERROR: Failed to get quote for buy";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
+        delete[] null_term_quote;
         return;
     }
+    delete[] null_term_quote;
     
     // Receive quote from Server Q
     struct sockaddr_in from_addr;
@@ -456,7 +526,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
         perror("recvfrom Server Q");
         const char* error_msg = "ERROR: Failed to get quote for buy";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
         return;
     }
     
@@ -464,7 +534,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     // If stock doesn't exist or error
     if (strncmp(buffer, "ERROR", 5) == 0) {
-        send(client_sockfd, buffer, bytes_received, 0);
+        send(client_sockfd, buffer, strlen(buffer) + 1, 0); // Include null terminator
         return;
     }
     
@@ -474,7 +544,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     if (parts.size() < 2) {
         const char* error_msg = "ERROR: Invalid quote response";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
         return;
     }
     
@@ -487,7 +557,21 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
                              std::to_string(current_price) + " = $" + 
                              std::to_string(total_cost);
     
-    send(client_sockfd, confirm_msg.c_str(), confirm_msg.length(), 0);
+    // Make sure to include the null terminator
+    size_t msg_len = confirm_msg.length() + 1; // +1 for null terminator
+    char* null_term_msg = new char[msg_len];
+    strcpy(null_term_msg, confirm_msg.c_str());
+    
+    printf("[Server M] Sending buy confirmation to client: '%s'\n", null_term_msg);
+    int send_res = send(client_sockfd, null_term_msg, msg_len, 0);
+    if (send_res == -1) {
+        perror("send buy confirmation to client");
+        delete[] null_term_msg;
+        return;
+    } else {
+        printf("[Server M] Successfully sent %d bytes of buy confirmation\n", send_res);
+    }
+    delete[] null_term_msg;
     
     // Get client confirmation
     if ((bytes_received = recv(client_sockfd, buffer, BUFFER_SIZE - 1, 0)) <= 0) {
@@ -501,10 +585,11 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     buffer[bytes_received] = '\0';
     std::string confirmation(buffer);
+    printf("[Server M] Received client confirmation: %s\n", confirmation.c_str());
     
     if (confirmation != "yes" && confirmation != "YES" && confirmation != "y" && confirmation != "Y") {
         const char* cancel_msg = "Buy transaction cancelled";
-        send(client_sockfd, cancel_msg, strlen(cancel_msg), 0);
+        send(client_sockfd, cancel_msg, strlen(cancel_msg) + 1, 0); // Include null terminator
         return;
     }
     
@@ -523,14 +608,20 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     printf("[Server M] Sending buy request to Server P: '%s'\n", buy_message.c_str());
     
-    // Send to Server P
-    if (sendto(udp_sockfd, buy_message.c_str(), buy_message.length(), 0,
+    // Send to Server P (include null terminator)
+    size_t buy_len = buy_message.length() + 1;
+    char* null_term_buy = new char[buy_len];
+    strcpy(null_term_buy, buy_message.c_str());
+    
+    if (sendto(udp_sockfd, null_term_buy, buy_len, 0,
               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr)) == -1) {
         perror("sendto Server P");
         const char* error_msg = "ERROR: Failed to process buy";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
+        delete[] null_term_buy;
         return;
     }
+    delete[] null_term_buy;
     
     // Receive confirmation from Server P
     from_len = sizeof(from_addr);
@@ -539,7 +630,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
         perror("recvfrom Server P");
         const char* error_msg = "ERROR: Failed to confirm buy";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
         return;
     }
     
@@ -549,7 +640,12 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     // Advance stock price in Server Q
     std::string advance_message = "ADVANCE " + stock_name;
     
-    if (sendto(udp_sockfd, advance_message.c_str(), advance_message.length(), 0,
+    // Include null terminator
+    size_t adv_len = advance_message.length() + 1;
+    char* null_term_adv = new char[adv_len];
+    strcpy(null_term_adv, advance_message.c_str());
+    
+    if (sendto(udp_sockfd, null_term_adv, adv_len, 0,
               (struct sockaddr *)&server_q_addr, sizeof(server_q_addr)) == -1) {
         perror("sendto Server Q (advance)");
     } else {
@@ -557,9 +653,20 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
         from_len = sizeof(from_addr);
         recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr *)&from_addr, &from_len);
     }
+    delete[] null_term_adv;
     
-    // Forward Server P's response to client
-    send(client_sockfd, buffer, strlen(buffer), 0);
+    // Forward Server P's response to client with null terminator
+    size_t resp_len = strlen(buffer) + 1; // +1 for null terminator
+    char* null_term_resp = new char[resp_len];
+    strcpy(null_term_resp, buffer);
+    
+    int send_res_final = send(client_sockfd, null_term_resp, resp_len, 0);
+    if (send_res_final == -1) {
+        perror("send buy result to client");
+    } else {
+        printf("[Server M] Successfully sent %d bytes of buy result\n", send_res_final);
+    }
+    delete[] null_term_resp;
 }
 
 void handle_sell(int client_sockfd, const std::string& stock_name, int num_shares) {
@@ -676,8 +783,19 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
                              std::to_string(current_price) + " = $" + 
                              std::to_string(total_value);
     
-    printf("[Server M] Sending sell confirmation to client: %s\n", confirm_msg.c_str());
-    send(client_sockfd, confirm_msg.c_str(), confirm_msg.length(), 0);
+    // Make sure to include the null terminator
+    size_t msg_len = confirm_msg.length() + 1; // +1 for null terminator
+    char* null_term_msg = new char[msg_len];
+    strcpy(null_term_msg, confirm_msg.c_str());
+    
+    printf("[Server M] Sending sell confirmation to client: '%s'\n", null_term_msg);
+    int send_res = send(client_sockfd, null_term_msg, msg_len, 0);
+    if (send_res == -1) {
+        perror("send sell confirmation to client");
+    } else {
+        printf("[Server M] Successfully sent %d bytes of sell confirmation\n", send_res);
+    }
+    delete[] null_term_msg;
     
     // Get client confirmation
     if ((bytes_received = recv(client_sockfd, buffer, BUFFER_SIZE - 1, 0)) <= 0) {
@@ -740,8 +858,18 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
         recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr *)&from_addr, &from_len);
     }
     
-    // Forward Server P's response to client
-    send(client_sockfd, buffer, strlen(buffer), 0);
+    // Forward Server P's response to client with null terminator
+    size_t resp_len = strlen(buffer) + 1; // +1 for null terminator
+    char* null_term_resp = new char[resp_len];
+    strcpy(null_term_resp, buffer);
+    
+    int send_res_final = send(client_sockfd, null_term_resp, resp_len, 0);
+    if (send_res_final == -1) {
+        perror("send sell result to client");
+    } else {
+        printf("[Server M] Successfully sent %d bytes of sell result\n", send_res_final);
+    }
+    delete[] null_term_resp;
 }
 
 void handle_position(int client_sockfd) {
@@ -879,8 +1007,18 @@ void handle_position(int client_sockfd) {
     
     result += "Total unrealized gain/loss: $" + std::to_string(total_gain);
     
-    // Send result to client
-    send(client_sockfd, result.c_str(), result.length(), 0);
+    // Send result to client with null terminator
+    size_t result_len = result.length() + 1; // +1 for null terminator
+    char* null_term_result = new char[result_len];
+    strcpy(null_term_result, result.c_str());
+    
+    int send_res = send(client_sockfd, null_term_result, result_len, 0);
+    if (send_res == -1) {
+        perror("send portfolio result to client");
+    } else {
+        printf("[Server M] Successfully sent %d bytes of portfolio data\n", send_res);
+    }
+    delete[] null_term_result;
 }
 
 std::vector<std::string> split_string(const std::string& str, char delimiter) {

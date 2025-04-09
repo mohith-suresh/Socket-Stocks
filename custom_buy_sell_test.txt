@@ -1,0 +1,7 @@
+user1
+sdvv789
+buy S2 5
+yes
+sell S2 2
+yes
+exit

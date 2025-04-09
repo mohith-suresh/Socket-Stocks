@@ -1,7 +1,7 @@
 [Client] Registered signal handler for SIGINT
 [Client] Socket created successfully (fd: 3)
 [Client] Attempting to connect to 127.0.0.1:45000
-[Client] Connected to Main Server using TCP on port 47018
+[Client] Connected to Main Server using TCP on port 47030
 [Client] Enter username: [Client] Username received: user1
 [Client] Enter password: [Client] Password received (length: 7)
 [Client] Sending auth message: AUTH user1 ******
@@ -19,4 +19,4 @@
   position - View your current portfolio
   exit - Logout and exit
 
-> [Client] Exiting...
+> 
