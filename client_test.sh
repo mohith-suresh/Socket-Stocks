@@ -14,6 +14,19 @@ echo -e "${YELLOW}Making sure servers are running...${NC}"
 pkill -9 -f "server[MAPQ]" 2>/dev/null || true
 sleep 1
 
+# Force rebuild all executables
+echo -e "${YELLOW}Rebuilding executables for compatibility...${NC}"
+make clean
+make all
+
+# Verify executables are compatible
+echo -e "${YELLOW}Verifying executable compatibility...${NC}"
+if ! file ./serverM | grep -q "executable"; then
+    echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
+    file ./serverM ./serverA ./serverP ./serverQ
+    exit 1
+fi
+
 # Start all servers
 ./serverM > serverM.log 2>&1 &
 sleep 1

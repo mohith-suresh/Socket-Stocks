@@ -11,9 +11,34 @@ echo -e "${YELLOW}==== Stock Trading System Quick Test ====${NC}"
 
 # Check if servers are running
 if ! pgrep -f "serverM" > /dev/null; then
-    echo -e "${RED}Servers are not running. Please start the servers first using:"
-    echo -e "./start_servers.sh${NC}"
-    exit 1
+    echo -e "${RED}Servers are not running.${NC}"
+    echo -e "${YELLOW}Starting servers automatically...${NC}"
+    
+    # Force clean rebuild
+    make clean
+    make all
+    
+    # Verify executables
+    if ! file ./serverM | grep -q "executable"; then
+        echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
+        file ./serverM ./serverA ./serverP ./serverQ
+        exit 1
+    fi
+    
+    # Start servers
+    ./serverM > serverM.log 2>&1 &
+    sleep 1
+    ./serverA > serverA.log 2>&1 &
+    sleep 1
+    ./serverP > serverP.log 2>&1 &
+    sleep 1
+    ./serverQ > serverQ.log 2>&1 &
+    sleep 1
+    
+    if ! pgrep -f "serverM" > /dev/null; then
+        echo -e "${RED}Failed to start servers. Check the logs for details.${NC}"
+        exit 1
+    fi
 fi
 
 echo -e "${GREEN}Servers detected as running!${NC}"

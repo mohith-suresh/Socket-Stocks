@@ -13,6 +13,20 @@ echo -e "${YELLOW}Cleaning up any previous processes...${NC}"
 pkill -9 -f "server[MAPQ]" 2>/dev/null || true
 sleep 1
 
+# Force rebuild all executables for system compatibility
+echo -e "${YELLOW}Rebuilding executables for this system...${NC}"
+make clean
+make all
+
+# Verify executables are compatible
+echo -e "${YELLOW}Verifying executable compatibility...${NC}"
+if ! file ./serverM | grep -q "executable" || ! file ./serverA | grep -q "executable"; then
+    echo -e "${RED}Error: Executables are not compatible with this system!${NC}"
+    echo -e "${YELLOW}Executables details:${NC}"
+    file ./serverM ./serverA
+    exit 1
+fi
+
 # Start only the servers needed for auth (M and A)
 echo -e "${YELLOW}Starting Server M...${NC}"
 ./serverM > serverM.log 2>&1 &
