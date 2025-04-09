@@ -1,0 +1,163 @@
+Below is a comprehensive checklist of all the requirements and “nuances” your project must meet according to the official EE450 Project Spring 2025 Rev. 02 document. You can go through this list feature by feature to verify that your current implementation conforms exactly to the specifications. Each section describes the expected behavior and what you must ensure when implementing that part of the system.
+
+──────────────────────────────
+	1.	Bootup and Process Startup
+──────────────────────────────
+• You must start the programs in the precise order:
+  – Main server (serverM)
+  – Authentication server (serverA)
+  – Portfolio server (serverP)
+  – Quote server (serverQ)
+  – Clients
+  Failure to follow the start-up order may result in incorrect inter-server communications.
+• Each server (as well as each client) must print the correct bootup message exactly as specified (e.g., “[Server A] Booting up using UDP on port ”).
+• Upon startup, each backend server must read its associated input file:
+  – serverA: members.txt
+  – serverP: portfolios.txt
+  – serverQ: quotes.txt
+  Store the contents into appropriate data structures for quick lookup.
+• The main server must use one UDP port for communications with all three backend servers (and the backend servers use the UDP ports as defined in the PORT NUMBER ALLOCATION table).
+• Dynamic ports (for client–main server TCP connections) must be retrieved with getsockname() rather than hardcoded.
+  
+
+──────────────────────────────
+2. Login and Authentication (Phase 2)
+──────────────────────────────
+• The client prompts for a username and an unencrypted password via the command line.
+• The client sends this information to the main server over TCP.
+• The main server must then:
+  – Convert the username to lowercase (usernames are case insensitive).
+  – Encrypt the password by offsetting each alphanumeric character by 3; for letters, use cyclic alphabetic order and for digits, cycle through 0–9. (For example, “Welcome” becomes “Zhofrph”, and digits wrap around.)
+• Once encrypted, the main server sends the (username and encrypted password) credentials to serverA over UDP.
+• ServerA checks these against the data loaded from members.txt and sends back a success or failure message.
+• Appropriate on-screen messages must be printed at every step:
+  – On the client: “[Client] Logging in.” followed by either “[Client] You have been granted access.” or “[Client] The credentials are incorrect. Please try again.”
+  – On serverA: When receiving login info, print “[Server A] Received username  and password ******.” and then either “[Server A] Member  has been authenticated.” or an error message indicating incorrect credentials.
+  
+
+──────────────────────────────
+3. Trading Operations – Quote, Buy, and Sell (Phase 3)
+──────────────────────────────
+A. Quote Command
+ • Two variations must be supported:
+  – “quote” (without any argument) to return the current price of all stocks.
+  – “quote ” to return the current price of a specified stock.
+ • If the specified stock name does not exist, the error message must follow the defined format exactly.
+ • The main server must forward the request to serverQ and, upon receipt, print on-screen messages like “[Server Q] Returned all stock quotes.” or “[Server Q] Returned the stock quote of .”
+  
+
+B. Buy Command
+ • When a client issues “buy  ”:
+  – The main server must forward a quote request (using the “sending” phrasing) to serverQ to retrieve the current price.
+  – The client is then prompted for a confirmation (Y/N) after being given the stock price.
+  – Upon a “Y” response:
+   – ServerM instructs serverP to update the client’s portfolio.
+   – The update must correctly calculate the new average buy price when additional shares are purchased (using the provided formula) and update the share count.
+   – ServerQ is instructed to advance the price (time shift) for that stock, even if the buy command fails because of a non‐existent stock (the price still advances in this case).
+  – Correct on-screen messages must be printed at each step (e.g., on serverM, “Received buy request from member …” and on serverP, confirmation messages).
+  
+
+C. Sell Command
+ • For “sell  ”:
+  – The main server must first get the current price from serverQ and then forward the sell request to serverP.
+  – ServerP checks if the client owns enough shares.
+  – If sufficient shares exist:
+   – The client must receive a confirmation prompt (“’s current price is . Proceed to sell? (Y/N)”).
+   – Upon confirmation, serverP updates the portfolio (adjust the share count, and keep the average buy price unchanged).
+   – ServerQ is instructed to advance the price for that stock.
+  – If the client does not have enough shares or the stock does not exist, an appropriate error message is sent by serverM (e.g., “[Client] Error:  does not have enough shares of  to sell. Please try again”).
+  – Even on an unsuccessful sale, the stock’s price moves to the next value.
+  
+
+──────────────────────────────
+4. Position Request (Phase 4)
+──────────────────────────────
+• When a client issues the “position” command:
+  – The main server contacts serverP to obtain the client’s portfolio.
+  – It also contacts serverQ to retrieve current prices for the stocks held.
+  – The program must calculate the total profit (or loss) using the formula:
+   Sum over stocks [number of shares × (current price – average buy price)].
+  – Stocks with zero shares should not be printed, but the header line “stock shares avg_buy_price” and the “current profit” line must still be displayed.
+  – The on-screen messages must exactly match the format (e.g., “[Client] Received the response from the main server …”).
+  
+
+──────────────────────────────
+5. Closing Client Connections (Phase 5)
+──────────────────────────────
+• Clients must be able to close their connection either by typing “exit” or via ctrl+c.
+• No extra on-screen messages are required for terminating the connections, but the sockets must be closed properly to prevent resource leaks.
+  
+
+──────────────────────────────
+6. File and Naming Conventions
+──────────────────────────────
+• Your source files must follow these naming conventions exactly:
+  – Client: client.c (or client.cpp) with header file (if any) as client.h
+  – Main Server: serverM.c (or serverM.cpp) with corresponding serverM.h if used
+  – Backend Servers: serverA.c (or serverA.cpp), serverP.c (or serverP.cpp), serverQ.c (or serverQ.cpp)
+  – All filenames must be in all lowercase except for the “M” in serverM.
+• Your submission folder must include:
+  – A Makefile supporting “make all” (to compile all executables) and “make clean” (to remove executables).
+  – A README file clearly listing your name, student ID, description of your files and any flags used (such as if you compile with –std=c++11).
+  – Do not include input data files or binaries.
+  
+
+──────────────────────────────
+7. Port Number Assignment and Communication
+──────────────────────────────
+• The ports used must exactly follow the “Port Number Allocation” section of the document:
+  – Server A: UDP port = 41000 + xxx (where xxx are your USC ID’s last three digits)
+  – Server P: UDP port = 42000 + xxx
+  – Server Q: UDP port = 43000 + xxx
+  – Server M: Uses one UDP port (44000+xxx) for communication with backend servers and a TCP port (45000+xxx) for client connections.
+• Clients use TCP to communicate with serverM.
+• Ports assigned dynamically must be obtained programmatically using getsockname(); no hardcoding of dynamic ports.
+  
+
+──────────────────────────────
+8. On-Screen Message Format
+──────────────────────────────
+• Follow the exact on-screen message templates provided for each server and client. These include:
+  – Server A messages for bootup and authentication (with “******” masking the password).
+  – Server P messages for position, buy, and sell requests along with confirmation messages.
+  – Server Q messages for quote requests and time-forward updates, printing the current price and time index appropriately.
+  – Server M messages for receiving requests, forwarding to appropriate backend servers, and relaying confirmations/responses.
+  – Client messages to prompt for commands, display received stock quotes, confirmations, and portfolio details.
+• Extra messages (for debugging) must be removed or commented out before submission.
+  
+
+──────────────────────────────
+9. Encryption and Data Integrity
+──────────────────────────────
+• The encryption scheme for the password is defined as follows:
+  – Offset each character and digit by 3 with cyclic wrapping (e.g., ‘z’ becomes ‘c’, “9” becomes “2”).
+  – The encryption is case sensitive for the password; the username is converted to lowercase.
+• Examples provided in the document (e.g., “Welcome to EE450!” becomes “Zhofrph wr HH783!”) must be exactly reproduced.
+  
+
+──────────────────────────────
+10. Additional Design and Implementation Rules
+──────────────────────────────
+• The host name must be hard coded as “localhost” or “127.0.0.1” in all codes.
+• The client, backend servers, and main server must remain running and continue to process additional requests until terminated manually (via Ctrl+C or the “exit” command).
+• For backend file updates (like portfolios.txt), either updating the file or keeping the updated data in memory is acceptable since the files are not checked after the program runs.
+• Be sure to close each socket and clean up resources to prevent zombie processes or port binding issues when restarting your servers.
+• You are allowed to reuse code from Beej’s Guide to Network Programming for socket operations; however, any such reuse must be clearly cited in your code.
+  
+
+──────────────────────────────
+11. Testing and Concurrency Assumptions
+──────────────────────────────
+• Multiple commands (login, trade, position, etc.) should be supported in a single login session – clients may perform several operations consecutively.
+• Assume that concurrent operations will not overlap in a way that affects critical data (e.g., you need not handle racing conditions for price updates).
+• The project will be tested with exactly two client processes, so ensure that your implementation handles multiple connections as specified.
+
+──────────────────────────────
+Final Notes
+──────────────────────────────
+Review your on-screen output against the templates provided in the project document. Every punctuation, spacing, and capitalization must match exactly as per the guidelines. Also, verify that your Makefile and README file fully describe your implementation and any deviations (if absolutely necessary) from the prescribed behavior.
+
+By methodically checking that each element from bootup to shutdown meets these requirements, you can be confident that your working project (even if originally built “scrappily”) is compliant with all the rules described in the official project document.
+  
+
+This checklist should help you review and update your project so that every nuance is correctly implemented.
