@@ -52,18 +52,29 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
 void handle_position(int client_sockfd);
 void handle_client(int client_sockfd);
 
-// Signal handler for Ctrl+C
+// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4
 void sigint_handler(int sig) {
+    (void)sig;  // Explicitly cast to void to prevent unused parameter warning
+    
+    printf("\n[Server M] Caught SIGINT signal, cleaning up and exiting...\n");
+    
+    // Close all open sockets
     if (tcp_sockfd != -1) {
+        printf("[Server M] Closing TCP socket (fd: %d)...\n", tcp_sockfd);
         close(tcp_sockfd);
     }
     if (udp_sockfd != -1) {
+        printf("[Server M] Closing UDP socket (fd: %d)...\n", udp_sockfd);
         close(udp_sockfd);
     }
+    
     // Close all client connections
+    printf("[Server M] Closing %zu client connections...\n", client_usernames.size());
     for (const auto& client : client_usernames) {
         close(client.first);
     }
+    
+    printf("[Server M] Cleanup complete, exiting.\n");
     exit(0);
 }
 
@@ -82,8 +93,19 @@ void encrypt_password(char* password) {
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler
-    signal(SIGINT, sigint_handler);
+    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4
+    struct sigaction sa;
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;    // Not using SA_RESTART to ensure interrupted system calls fail with EINTR
+    
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction");
+        fprintf(stderr, "[Server M] Failed to register SIGINT handler: %s\n", strerror(errno));
+        exit(1);
+    }
+    
+    printf("[Server M] Registered signal handler for SIGINT\n");
     
     struct sockaddr_in tcp_my_addr;    // TCP server address
     struct sockaddr_in udp_my_addr;    // UDP server address
@@ -100,22 +122,35 @@ int main(int argc, char *argv[]) {
         udp_port = atoi(argv[2]);
     }
 
-    // Create TCP socket
+    // Create TCP socket - Following Beej's Guide Section 5.1
     if ((tcp_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         perror("TCP socket");
+        fprintf(stderr, "[Server M] Failed to create TCP socket: %s\n", strerror(errno));
         exit(1);
     }
     
     printf("[Server M] TCP socket created with fd %d\n", tcp_sockfd);
     
-    // Allow port reuse
+    // Allow port reuse - Following Beej's Guide Section 7.1
     int yes = 1;
     if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
         perror("setsockopt SO_REUSEADDR");
+        fprintf(stderr, "[Server M] Failed to set SO_REUSEADDR option: %s\n", strerror(errno));
+        close(tcp_sockfd);
         exit(1);
     }
     
-    printf("[Server M] Set SO_REUSEADDR option\n");
+    // Set receive timeout (optional, as per Beej's recommendation in 7.4)
+    struct timeval tv;
+    tv.tv_sec = 10;  // 10 second timeout
+    tv.tv_usec = 0;
+    if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
+        perror("setsockopt SO_RCVTIMEO");
+        // Non-fatal, just warn
+        fprintf(stderr, "[Server M] Warning: Failed to set SO_RCVTIMEO option: %s\n", strerror(errno));
+    }
+    
+    printf("[Server M] Set socket options successfully\n");
     
     // Setup TCP server address
     memset(&tcp_my_addr, 0, sizeof(tcp_my_addr));
@@ -142,10 +177,24 @@ int main(int argc, char *argv[]) {
     }
     printf("[Server M] Now listening on TCP port %d\n", tcp_port);
 
-    // Create UDP socket
+    // Create UDP socket - Following Beej's Guide Section 5.3
     if ((udp_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
         perror("UDP socket");
+        fprintf(stderr, "[Server M] Failed to create UDP socket: %s\n", strerror(errno));
+        close(tcp_sockfd); // Clean up TCP socket before exiting
         exit(1);
+    }
+    
+    printf("[Server M] UDP socket created with fd %d\n", udp_sockfd);
+    
+    // Set UDP socket timeout as per Beej's Guide Section 7.4
+    struct timeval udp_tv;
+    udp_tv.tv_sec = 5;  // 5 second timeout for UDP operations
+    udp_tv.tv_usec = 0;
+    if (setsockopt(udp_sockfd, SOL_SOCKET, SO_RCVTIMEO, &udp_tv, sizeof(udp_tv)) == -1) {
+        perror("setsockopt UDP SO_RCVTIMEO");
+        // Non-fatal, just warn
+        fprintf(stderr, "[Server M] Warning: Failed to set UDP SO_RCVTIMEO option: %s\n", strerror(errno));
     }
     
     // Setup UDP server address
@@ -154,11 +203,16 @@ int main(int argc, char *argv[]) {
     udp_my_addr.sin_port = htons(udp_port);
     udp_my_addr.sin_addr.s_addr = INADDR_ANY;
     
-    // Bind UDP socket
+    // Bind UDP socket - Following Beej's Guide Section 5.3
     if (bind(udp_sockfd, (struct sockaddr *)&udp_my_addr, sizeof(udp_my_addr)) == -1) {
         perror("UDP bind");
+        fprintf(stderr, "[Server M] Failed to bind UDP socket to port %d: %s\n", udp_port, strerror(errno));
+        close(tcp_sockfd);
+        close(udp_sockfd);
         exit(1);
     }
+    
+    printf("[Server M] Successfully bound UDP socket to port %d\n", udp_port);
 
     // Print startup message with more details
     struct sockaddr_in tcp_actual;

@@ -60,17 +60,35 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
 void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len);
 void handle_advance(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len);
 
-// Signal handler for Ctrl+C
+// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4
 void sigint_handler(int sig) {
+    (void)sig;  // Explicitly cast to void to prevent unused parameter warning
+    
+    printf("\n[Server Q] Caught SIGINT signal, cleaning up and exiting...\n");
+    
     if (sockfd != -1) {
+        printf("[Server Q] Closing socket (fd: %d)...\n", sockfd);
         close(sockfd);
     }
+    
+    printf("[Server Q] Cleanup complete, exiting.\n");
     exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler
-    signal(SIGINT, sigint_handler);
+    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4
+    struct sigaction sa;
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;    // Not using SA_RESTART to ensure interrupted system calls fail with EINTR
+    
+    if (sigaction(SIGINT, &sa, NULL) == -1) {
+        perror("sigaction");
+        fprintf(stderr, "[Server Q] Failed to register SIGINT handler: %s\n", strerror(errno));
+        exit(1);
+    }
+    
+    printf("[Server Q] Registered signal handler for SIGINT\n");
     
     struct sockaddr_in my_addr;     // Server address
     struct sockaddr_in client_addr; // Client address
@@ -83,11 +101,33 @@ int main(int argc, char *argv[]) {
         port = atoi(argv[1]);
     }
 
-    // Create UDP socket
+    // Create UDP socket - Following Beej's Guide Section 5.3
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
         perror("socket");
+        fprintf(stderr, "[Server Q] Failed to create UDP socket: %s\n", strerror(errno));
         exit(1);
     }
+    
+    // Allow port reuse - Following Beej's Guide Section 7.1
+    int yes = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+        perror("setsockopt SO_REUSEADDR");
+        fprintf(stderr, "[Server Q] Failed to set SO_REUSEADDR option: %s\n", strerror(errno));
+        close(sockfd);
+        exit(1);
+    }
+    
+    // Set receive timeout - Following Beej's Guide Section 7.4
+    struct timeval tv;
+    tv.tv_sec = 5;  // 5 second timeout
+    tv.tv_usec = 0;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
+        perror("setsockopt SO_RCVTIMEO");
+        // Non-fatal, just warn
+        fprintf(stderr, "[Server Q] Warning: Failed to set SO_RCVTIMEO option: %s\n", strerror(errno));
+    }
+    
+    printf("[Server Q] Socket options set successfully\n");
     
     // Setup server address
     memset(&my_addr, 0, sizeof(my_addr));
