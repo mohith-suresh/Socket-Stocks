@@ -42,7 +42,9 @@ All server components have been updated to strictly adhere to Beej's Guide to Ne
 7. Fixed timeout handling in socket communications
 8. Improved buy/sell/position functionality with proper null termination
 9. Fixed comprehensive test script to properly validate all test cases
+10. Added multiple client support using fork() in Server M for concurrent connections
+11. Fixed "insufficient shares" error message with proper null termination
 
 ## Conclusion
 
-The system is now fully functional with all components working correctly. All test cases pass successfully, and the core functionality of authentication, quote retrieval, portfolio management, and buy/sell transactions operate as expected. The implementation strictly adheres to Beej's Guide to Network Programming standards and best practices.
+The system is now fully functional with all components working correctly. All test cases pass successfully, and the core functionality of authentication, quote retrieval, portfolio management, and buy/sell transactions operate as expected. The system supports multiple client connections simultaneously through the use of the fork() system call, allowing the server to handle concurrent client sessions. Error handling is robust, including proper handling of insufficient shares during selling operations with appropriate error messages. The implementation strictly adheres to Beej's Guide to Network Programming standards and best practices.

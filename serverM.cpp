@@ -8,6 +8,9 @@
  * - Manages authentication, trading, and portfolio operations
  */
 
+// Portions of this code are based on Beej's Guide to Network Programming (v3.2.1)
+// https://beej.us/guide/bgnet/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -24,14 +27,15 @@
 #include <sstream>
 #include <vector>
 #include <map>
+#include <fstream>
 #include <iostream>
 
 // Default values - replace XXX with your USC ID last 3 digits
-#define SERVER_A_PORT 41000 
-#define SERVER_P_PORT 42000 
-#define SERVER_Q_PORT 43000 
-#define SERVER_M_UDP_PORT 44000 
-#define SERVER_M_TCP_PORT 45000
+#define SERVER_A_PORT 41654
+#define SERVER_P_PORT 42654
+#define SERVER_Q_PORT 43654
+#define SERVER_M_UDP_PORT 44654
+#define SERVER_M_TCP_PORT 45654
 #define SERVER_IP "127.0.0.1"  // localhost for inter-server communication
 #define BUFFER_SIZE 1024
 #define BACKLOG 10
@@ -52,26 +56,21 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
 void handle_position(int client_sockfd);
 void handle_client(int client_sockfd);
 
-// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4
+// Graceful cleanup on Ctrl+C (SIGINT) - Based on Beej's Guide Section 9.4 (Signal Handling)
 void sigint_handler(int sig) {
     (void)sig;  // Explicitly cast to void to prevent unused parameter warning
     
     printf("\n[Server M] Caught SIGINT signal, cleaning up and exiting...\n");
     
-    // Close all open sockets
+    // Following Beej's Guide Section 5.9 (close() and shutdown())
     if (tcp_sockfd != -1) {
         printf("[Server M] Closing TCP socket (fd: %d)...\n", tcp_sockfd);
         close(tcp_sockfd);
     }
+    
     if (udp_sockfd != -1) {
         printf("[Server M] Closing UDP socket (fd: %d)...\n", udp_sockfd);
         close(udp_sockfd);
-    }
-    
-    // Close all client connections
-    printf("[Server M] Closing %zu client connections...\n", client_usernames.size());
-    for (const auto& client : client_usernames) {
-        close(client.first);
     }
     
     printf("[Server M] Cleanup complete, exiting.\n");
@@ -93,11 +92,11 @@ void encrypt_password(char* password) {
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4
+    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4 (Signal Handling)
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;    // Not using SA_RESTART to ensure interrupted system calls fail with EINTR
+    sa.sa_flags = SA_RESTART;  // Restart interrupted system calls
     
     if (sigaction(SIGINT, &sa, NULL) == -1) {
         perror("sigaction");
@@ -107,143 +106,163 @@ int main(int argc, char *argv[]) {
     
     printf("[Server M] Registered signal handler for SIGINT\n");
     
-    struct sockaddr_in tcp_my_addr;    // TCP server address
-    struct sockaddr_in udp_my_addr;    // UDP server address
-    struct sockaddr_in client_addr;   // Client address
-    socklen_t sin_size;
-    int tcp_port = SERVER_M_TCP_PORT;
-    int udp_port = SERVER_M_UDP_PORT;
+    // Setting up TCP socket using getaddrinfo, socket, bind, listen
+    // Based on Beej's Guide Sections 5.1 (Client-Server Background) and 5.2 (Simple Stream Server)
+    struct addrinfo tcp_hints, *tcp_servinfo, *p;
+    int rv;
+    char s[INET6_ADDRSTRLEN];
 
-    // Check for custom port arguments
-    if (argc > 1) {
-        tcp_port = atoi(argv[1]);
-    }
-    if (argc > 2) {
-        udp_port = atoi(argv[2]);
+    memset(&tcp_hints, 0, sizeof tcp_hints);
+    tcp_hints.ai_family = AF_INET; // Force IPv4
+    tcp_hints.ai_socktype = SOCK_STREAM;
+    tcp_hints.ai_flags = AI_PASSIVE; // Use my IP
+
+    if ((rv = getaddrinfo(NULL, std::to_string(SERVER_M_TCP_PORT).c_str(), &tcp_hints, &tcp_servinfo)) != 0) {
+        fprintf(stderr, "[Server M] getaddrinfo: %s\n", gai_strerror(rv));
+        exit(1);
     }
 
-    // Create TCP socket - Following Beej's Guide Section 5.1
-    if ((tcp_sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("TCP socket");
-        fprintf(stderr, "[Server M] Failed to create TCP socket: %s\n", strerror(errno));
+    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.2
+    for(p = tcp_servinfo; p != NULL; p = p->ai_next) {
+        if ((tcp_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("TCP socket");
+            continue;
+        }
+
+        // Allow port reuse - Following Beej's Guide Section 7.1 (setsockopt())
+        int yes = 1;
+        if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+            perror("setsockopt SO_REUSEADDR");
+            close(tcp_sockfd);
+            continue;
+        }
+
+        if (bind(tcp_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(tcp_sockfd);
+            perror("TCP bind");
+            continue;
+        }
+
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "[Server M] Failed to bind TCP socket\n");
         exit(1);
     }
+
+    freeaddrinfo(tcp_servinfo);
     
-    printf("[Server M] TCP socket created with fd %d\n", tcp_sockfd);
-    
-    // Allow port reuse - Following Beej's Guide Section 7.1
-    int yes = 1;
-    if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-        perror("setsockopt SO_REUSEADDR");
-        fprintf(stderr, "[Server M] Failed to set SO_REUSEADDR option: %s\n", strerror(errno));
-        close(tcp_sockfd);
-        exit(1);
-    }
-    
-    // Set receive timeout (optional, as per Beej's recommendation in 7.4)
-    struct timeval tv;
-    tv.tv_sec = 10;  // 10 second timeout
-    tv.tv_usec = 0;
-    if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
-        perror("setsockopt SO_RCVTIMEO");
-        // Non-fatal, just warn
-        fprintf(stderr, "[Server M] Warning: Failed to set SO_RCVTIMEO option: %s\n", strerror(errno));
-    }
-    
-    printf("[Server M] Set socket options successfully\n");
-    
-    // Setup TCP server address
-    memset(&tcp_my_addr, 0, sizeof(tcp_my_addr));
-    tcp_my_addr.sin_family = AF_INET;
-    tcp_my_addr.sin_port = htons(tcp_port);
-    // Bind to all interfaces (0.0.0.0) to allow connections from other machines/containers
-    tcp_my_addr.sin_addr.s_addr = INADDR_ANY;
-    
-    // Bind TCP socket
-    printf("[Server M] Attempting to bind TCP socket to port %d...\n", tcp_port);
-    if (bind(tcp_sockfd, (struct sockaddr *)&tcp_my_addr, sizeof(tcp_my_addr)) == -1) {
-        perror("TCP bind");
-        printf("[Server M] Failed to bind TCP socket to port %d: %s\n", tcp_port, strerror(errno));
-        exit(1);
-    }
-    printf("[Server M] Successfully bound TCP socket\n");
-    
-    // Listen on TCP socket
-    printf("[Server M] Attempting to listen on TCP socket...\n");
+    // Listening for incoming TCP connections - Beej's Guide Section 5.2
     if (listen(tcp_sockfd, BACKLOG) == -1) {
         perror("listen");
-        printf("[Server M] Failed to listen on TCP socket: %s\n", strerror(errno));
         exit(1);
     }
-    printf("[Server M] Now listening on TCP port %d\n", tcp_port);
+    
+    printf("[Server M] TCP socket setup complete, listening on port %d\n", SERVER_M_TCP_PORT);
 
-    // Create UDP socket - Following Beej's Guide Section 5.3
-    if ((udp_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        perror("UDP socket");
-        fprintf(stderr, "[Server M] Failed to create UDP socket: %s\n", strerror(errno));
-        close(tcp_sockfd); // Clean up TCP socket before exiting
-        exit(1);
-    }
+    // Setting up UDP socket using getaddrinfo and bind
+    // Based on Beej's Guide Section 5.3 (Datagram Sockets)
+    struct addrinfo udp_hints, *udp_servinfo;
     
-    printf("[Server M] UDP socket created with fd %d\n", udp_sockfd);
-    
-    // Set UDP socket timeout as per Beej's Guide Section 7.4
-    struct timeval udp_tv;
-    udp_tv.tv_sec = 5;  // 5 second timeout for UDP operations
-    udp_tv.tv_usec = 0;
-    if (setsockopt(udp_sockfd, SOL_SOCKET, SO_RCVTIMEO, &udp_tv, sizeof(udp_tv)) == -1) {
-        perror("setsockopt UDP SO_RCVTIMEO");
-        // Non-fatal, just warn
-        fprintf(stderr, "[Server M] Warning: Failed to set UDP SO_RCVTIMEO option: %s\n", strerror(errno));
-    }
-    
-    // Setup UDP server address
-    memset(&udp_my_addr, 0, sizeof(udp_my_addr));
-    udp_my_addr.sin_family = AF_INET;
-    udp_my_addr.sin_port = htons(udp_port);
-    udp_my_addr.sin_addr.s_addr = INADDR_ANY;
-    
-    // Bind UDP socket - Following Beej's Guide Section 5.3
-    if (bind(udp_sockfd, (struct sockaddr *)&udp_my_addr, sizeof(udp_my_addr)) == -1) {
-        perror("UDP bind");
-        fprintf(stderr, "[Server M] Failed to bind UDP socket to port %d: %s\n", udp_port, strerror(errno));
+    memset(&udp_hints, 0, sizeof udp_hints);
+    udp_hints.ai_family = AF_INET; // Force IPv4
+    udp_hints.ai_socktype = SOCK_DGRAM;
+    udp_hints.ai_flags = AI_PASSIVE; // Use my IP
+
+    if ((rv = getaddrinfo(NULL, std::to_string(SERVER_M_UDP_PORT).c_str(), &udp_hints, &udp_servinfo)) != 0) {
+        fprintf(stderr, "[Server M] getaddrinfo: %s\n", gai_strerror(rv));
         close(tcp_sockfd);
-        close(udp_sockfd);
         exit(1);
     }
-    
-    printf("[Server M] Successfully bound UDP socket to port %d\n", udp_port);
 
-    // Print startup message with more details
+    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.3
+    for(p = udp_servinfo; p != NULL; p = p->ai_next) {
+        if ((udp_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("UDP socket");
+            continue;
+        }
+
+        // Allow port reuse - Following Beej's Guide Section 7.1 (setsockopt())
+        int yes = 1;
+        if (setsockopt(udp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+            perror("setsockopt SO_REUSEADDR");
+            close(udp_sockfd);
+            continue;
+        }
+
+        if (bind(udp_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(udp_sockfd);
+            perror("UDP bind");
+            continue;
+        }
+
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "[Server M] Failed to bind UDP socket\n");
+        close(tcp_sockfd);
+        exit(1);
+    }
+
+    freeaddrinfo(udp_servinfo);
+    
+    printf("[Server M] UDP socket setup complete, bound to port %d\n", SERVER_M_UDP_PORT);
+    
+    // Print startup message with more details - Following Beej's Guide Section 5.1 (Client-Server Background)
     struct sockaddr_in tcp_actual;
     socklen_t tcp_len = sizeof(tcp_actual);
     if (getsockname(tcp_sockfd, (struct sockaddr*)&tcp_actual, &tcp_len) == -1) {
         perror("getsockname");
     } else {
         printf("[Server M] Booting up using TCP on port %d (actual: %d) and UDP on port %d\n", 
-               tcp_port, ntohs(tcp_actual.sin_port), udp_port);
+               SERVER_M_TCP_PORT, ntohs(tcp_actual.sin_port), SERVER_M_UDP_PORT);
         printf("[Server M] TCP socket fd: %d, UDP socket fd: %d\n", tcp_sockfd, udp_sockfd);
         printf("[Server M] TCP IP binding: %s\n", inet_ntoa(tcp_actual.sin_addr));
     }
     
-    // Main server loop
+    // Main server loop - Following Beej's Guide Section 5.2 (A Simple Stream Server)
+    struct sockaddr_storage their_addr;
+    socklen_t sin_size = sizeof their_addr;
+    char client_ip[INET_ADDRSTRLEN];
+    
     while (1) {
-        sin_size = sizeof(client_addr);
-        int client_sockfd = accept(tcp_sockfd, (struct sockaddr *)&client_addr, &sin_size);
-        
+        // Accepting new TCP connection - Based on Beej's Guide Section 5.2
+        int client_sockfd = accept(tcp_sockfd, (struct sockaddr *)&their_addr, &sin_size);
         if (client_sockfd == -1) {
             perror("accept");
             continue;
         }
         
-        printf("[Server M] Accepted new client connection from %s:%d\n", 
-               inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+        // Convert client IP to string for logging
+        inet_ntop(AF_INET, &(((struct sockaddr_in*)&their_addr)->sin_addr),
+                  client_ip, INET_ADDRSTRLEN);
+        printf("[Server M] New connection from %s:%d\n", 
+               client_ip, ntohs(((struct sockaddr_in*)&their_addr)->sin_port));
         
-        // Instead of forking, handle directly
-        printf("[Server M] Handling client directly (no fork)\n");
-        handle_client(client_sockfd);
-        close(client_sockfd);
-        printf("[Server M] Client connection closed, waiting for new connections\n");
+        // Forking a child process to handle client - Based on Beej's Guide Section 5.2
+        pid_t child_pid = fork();
+        if (child_pid == -1) {
+            perror("fork");
+            close(client_sockfd);
+            continue;
+        }
+        
+        if (child_pid == 0) {  // Child process
+            close(tcp_sockfd);  // Child doesn't need the listener
+            handle_client(client_sockfd);
+            close(client_sockfd);
+            exit(0);
+        }
+        
+        // Parent process
+        close(client_sockfd);  // Parent doesn't need this
+        
+        // Cleaning up zombie child processes - Based on Beej's Guide Section 5.2
+        while (waitpid(-1, NULL, WNOHANG) > 0) {
+            // Keep cleaning up zombies
+        }
     }
     
     return 0;
@@ -333,40 +352,24 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     server_a_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     printf("[Server M] Server A address set to %s:%d\n", SERVER_IP, SERVER_A_PORT);
     
-    // Send to Server A (include null terminator in length)
-    printf("[Server M] Sending auth message to Server A...\n");
-    // Make sure to include the null terminator
-    size_t full_length = auth_message.length() + 1; // +1 for null terminator
-    char* null_term_msg = new char[full_length];
-    strcpy(null_term_msg, auth_message.c_str());
-    
-    printf("[Server M] Message with null: '%s' (length: %zu)\n", null_term_msg, full_length);
-    
-    int send_result = sendto(udp_sockfd, null_term_msg, full_length, 0,
-                          (struct sockaddr *)&server_a_addr, sizeof(server_a_addr));
-    if (send_result == -1) {
-        perror("sendto Server A");
-        printf("[Server M] Failed to send auth message to Server A: %s\n", strerror(errno));
-        const char* error_msg = "AUTH_FAILED";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
-        delete[] null_term_msg;
+    // Sending AUTH request to Server A using UDP
+    // Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
+    // Note: null-termination of messages is project-specific
+    if (sendto(udp_sockfd, auth_message.c_str(), auth_message.length(), 0,
+               (struct sockaddr *)&server_a_addr, sizeof(server_a_addr)) == -1) {
+        perror("sendto");
         return false;
     }
-    printf("[Server M] Successfully sent %d bytes to Server A\n", send_result);
-    delete[] null_term_msg;
     
-    // Receive response from Server A
-    printf("[Server M] Waiting for response from Server A...\n");
+    // Receiving AUTH response from Server A using UDP
+    // Based on Beej's Guide Section 5.8 (recvfrom — DGRAM-style)
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
     int bytes_received;
     
     if ((bytes_received = recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0,
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
-        perror("recvfrom Server A");
-        printf("[Server M] Failed to receive response from Server A: %s\n", strerror(errno));
-        const char* error_msg = "AUTH_FAILED";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        perror("recvfrom");
         return false;
     }
     
@@ -772,7 +775,20 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     // If not enough shares
     if (strcmp(buffer, "INSUFFICIENT_SHARES") == 0) {
         const char* error_msg = "ERROR: You do not have enough shares to sell";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        
+        // Make sure to include the null terminator
+        size_t error_len = strlen(error_msg) + 1; // +1 for null terminator
+        char* null_term_error = new char[error_len];
+        strcpy(null_term_error, error_msg);
+        
+        printf("[Server M] Sending insufficient shares error to client: '%s'\n", null_term_error);
+        int send_res = send(client_sockfd, null_term_error, error_len, 0);
+        if (send_res == -1) {
+            perror("send insufficient shares error to client");
+        } else {
+            printf("[Server M] Successfully sent %d bytes of insufficient shares error\n", send_res);
+        }
+        delete[] null_term_error;
         return;
     }
     
@@ -813,7 +829,20 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     
     if (confirmation != "yes" && confirmation != "YES" && confirmation != "y" && confirmation != "Y") {
         const char* cancel_msg = "Sell transaction cancelled";
-        send(client_sockfd, cancel_msg, strlen(cancel_msg), 0);
+        
+        // Make sure to include the null terminator
+        size_t msg_len = strlen(cancel_msg) + 1; // +1 for null terminator
+        char* null_term_msg = new char[msg_len];
+        strcpy(null_term_msg, cancel_msg);
+        
+        printf("[Server M] Sending cancellation message to client: '%s'\n", null_term_msg);
+        int send_res = send(client_sockfd, null_term_msg, msg_len, 0);
+        if (send_res == -1) {
+            perror("send cancellation to client");
+        } else {
+            printf("[Server M] Successfully sent %d bytes of cancellation message\n", send_res);
+        }
+        delete[] null_term_msg;
         return;
     }
     
@@ -823,14 +852,27 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     
     printf("[Server M] Sending sell request to Server P: '%s'\n", sell_message.c_str());
     
-    // Send to Server P
-    if (sendto(udp_sockfd, sell_message.c_str(), sell_message.length(), 0,
+    // Send to Server P (include null terminator)
+    size_t sell_len = sell_message.length() + 1;
+    char* null_term_sell = new char[sell_len];
+    strcpy(null_term_sell, sell_message.c_str());
+    
+    if (sendto(udp_sockfd, null_term_sell, sell_len, 0,
               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr)) == -1) {
         perror("sendto Server P");
         const char* error_msg = "ERROR: Failed to process sell";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        
+        // Make sure to include the null terminator
+        size_t error_len = strlen(error_msg) + 1;
+        char* null_term_error = new char[error_len];
+        strcpy(null_term_error, error_msg);
+        
+        send(client_sockfd, null_term_error, error_len, 0);
+        delete[] null_term_error;
+        delete[] null_term_sell;
         return;
     }
+    delete[] null_term_sell;
     
     // Receive confirmation from Server P
     from_len = sizeof(from_addr);
@@ -839,7 +881,14 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
         perror("recvfrom Server P");
         const char* error_msg = "ERROR: Failed to confirm sell";
-        send(client_sockfd, error_msg, strlen(error_msg), 0);
+        
+        // Make sure to include the null terminator
+        size_t error_len = strlen(error_msg) + 1;
+        char* null_term_error = new char[error_len];
+        strcpy(null_term_error, error_msg);
+        
+        send(client_sockfd, null_term_error, error_len, 0);
+        delete[] null_term_error;
         return;
     }
     
@@ -849,7 +898,12 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     // Advance stock price in Server Q
     std::string advance_message = "ADVANCE " + stock_name;
     
-    if (sendto(udp_sockfd, advance_message.c_str(), advance_message.length(), 0,
+    // Include null terminator
+    size_t advance_len = advance_message.length() + 1;
+    char* null_term_advance = new char[advance_len];
+    strcpy(null_term_advance, advance_message.c_str());
+    
+    if (sendto(udp_sockfd, null_term_advance, advance_len, 0,
               (struct sockaddr *)&server_q_addr, sizeof(server_q_addr)) == -1) {
         perror("sendto Server Q (advance)");
     } else {
@@ -857,6 +911,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
         from_len = sizeof(from_addr);
         recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr *)&from_addr, &from_len);
     }
+    delete[] null_term_advance;
     
     // Forward Server P's response to client with null terminator
     size_t resp_len = strlen(buffer) + 1; // +1 for null terminator
@@ -950,7 +1005,7 @@ void handle_position(int client_sockfd) {
     server_q_addr.sin_port = htons(SERVER_Q_PORT);
     server_q_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
-    std::string result = "Your portfolio:\n";
+    std::string result;
     double total_gain = 0.0;
     
     for (size_t i = 1; i < portfolio_lines.size(); i++) {
@@ -999,13 +1054,15 @@ void handle_position(int client_sockfd) {
         double stock_gain = shares * (current_price - avg_price);
         total_gain += stock_gain;
         
-        // Add to result
-        result += stock_name + ": " + std::to_string(shares) + " shares, avg price: $" + 
-                 std::to_string(avg_price) + ", current price: $" + std::to_string(current_price) + 
-                 ", gain/loss: $" + std::to_string(stock_gain) + "\n";
+        // Add to result in required format
+        char formatted_line[100];
+        snprintf(formatted_line, sizeof(formatted_line), "%s %d %.6f", stock_name.c_str(), shares, avg_price);
+        result += std::string(formatted_line) + "\n";
     }
     
-    result += "Total unrealized gain/loss: $" + std::to_string(total_gain);
+    char profit_line[100];
+    snprintf(profit_line, sizeof(profit_line), "Total unrealized gain/loss: $%.6f", total_gain);
+    result += std::string(profit_line);
     
     // Send result to client with null terminator
     size_t result_len = result.length() + 1; // +1 for null terminator

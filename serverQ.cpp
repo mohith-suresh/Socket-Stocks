@@ -9,6 +9,9 @@
  * - Communicates with Server M via UDP
  */
 
+// Portions of this code are based on Beej's Guide to Network Programming (v3.2.1)
+// https://beej.us/guide/bgnet/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -29,7 +32,7 @@
 #include <iostream>
 
 // Default values - replace XXX with your USC ID last 3 digits
-#define SERVER_Q_PORT 43000
+#define SERVER_Q_PORT 43654
 #define BUFFER_SIZE 1024
 #define QUOTES_FILE "quotes.txt"
 #define MAX_PRICES 10 // Each stock has 10 prices that cycle
@@ -60,7 +63,7 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
 void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len);
 void handle_advance(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len);
 
-// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4
+// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4 (Signal Handling)
 void sigint_handler(int sig) {
     (void)sig;  // Explicitly cast to void to prevent unused parameter warning
     
@@ -76,7 +79,7 @@ void sigint_handler(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4
+    // Graceful shutdown with SIGINT - Based on Beej's Guide Section 9.4 (Signal Handling)
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
@@ -90,77 +93,79 @@ int main(int argc, char *argv[]) {
     
     printf("[Server Q] Registered signal handler for SIGINT\n");
     
-    struct sockaddr_in my_addr;     // Server address
-    struct sockaddr_in client_addr; // Client address
-    socklen_t addr_len;
-    char buffer[BUFFER_SIZE];
-    int port = SERVER_Q_PORT;
+    // Setting up UDP socket with getaddrinfo, socket, and bind
+    // Based on Beej's Guide Section 5.3 (Datagram Sockets)
+    struct addrinfo hints, *servinfo, *p;
+    int rv;
+    char s[INET6_ADDRSTRLEN];
 
-    // Check for custom port argument
-    if (argc > 1) {
-        port = atoi(argv[1]);
-    }
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET; // Force IPv4
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_PASSIVE; // Use my IP
 
-    // Create UDP socket - Following Beej's Guide Section 5.3
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        perror("socket");
-        fprintf(stderr, "[Server Q] Failed to create UDP socket: %s\n", strerror(errno));
+    if ((rv = getaddrinfo(NULL, std::to_string(SERVER_Q_PORT).c_str(), &hints, &servinfo)) != 0) {
+        fprintf(stderr, "[Server Q] getaddrinfo: %s\n", gai_strerror(rv));
         exit(1);
     }
-    
-    // Allow port reuse - Following Beej's Guide Section 7.1
-    int yes = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-        perror("setsockopt SO_REUSEADDR");
-        fprintf(stderr, "[Server Q] Failed to set SO_REUSEADDR option: %s\n", strerror(errno));
-        close(sockfd);
+
+    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.3
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("socket");
+            continue;
+        }
+
+        // Enabling SO_REUSEADDR - Based on Beej's Guide Section 7.1 (setsockopt())
+        int yes = 1;
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+            perror("setsockopt SO_REUSEADDR");
+            close(sockfd);
+            continue;
+        }
+
+        if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("bind");
+            continue;
+        }
+
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "[Server Q] Failed to bind socket\n");
         exit(1);
     }
-    
-    // Set receive timeout - Following Beej's Guide Section 7.4
-    struct timeval tv;
-    tv.tv_sec = 5;  // 5 second timeout
-    tv.tv_usec = 0;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
-        perror("setsockopt SO_RCVTIMEO");
-        // Non-fatal, just warn
-        fprintf(stderr, "[Server Q] Warning: Failed to set SO_RCVTIMEO option: %s\n", strerror(errno));
-    }
+
+    freeaddrinfo(servinfo);
     
     printf("[Server Q] Socket options set successfully\n");
-    
-    // Setup server address
-    memset(&my_addr, 0, sizeof(my_addr));
-    my_addr.sin_family = AF_INET;
-    my_addr.sin_port = htons(port);
-    my_addr.sin_addr.s_addr = INADDR_ANY;
-    
-    // Bind socket
-    if (bind(sockfd, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) {
-        perror("bind");
-        exit(1);
-    }
     
     // Load quotes
     load_quotes_file();
     
-    printf("[Server Q] Booting up using UDP on port %d\n", port);
+    printf("[Server Q] Booting up using UDP on port %d\n", SERVER_Q_PORT);
     
-    // Main server loop
+    // Main server loop - Following Beej's Guide Section 5.3 (Datagram Sockets)
+    struct sockaddr_storage their_addr;
+    socklen_t addr_len;
+    char buffer[BUFFER_SIZE];
+    int numbytes;
+
     while (1) {
-        addr_len = sizeof(client_addr);
-        int bytes_received = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0,
-                                     (struct sockaddr *)&client_addr, &addr_len);
-        
-        if (bytes_received == -1) {
+        addr_len = sizeof their_addr;
+        // Receiving messages via UDP - Based on Beej's Guide Section 5.8 (recvfrom — DGRAM-style)
+        if ((numbytes = recvfrom(sockfd, buffer, BUFFER_SIZE-1, 0,
+            (struct sockaddr *)&their_addr, &addr_len)) == -1) {
             perror("recvfrom");
             continue;
         }
-        
-        buffer[bytes_received] = '\0';
+
+        buffer[numbytes] = '\0';
         printf("[Server Q] Received message: %s\n", buffer);
         
-        process_message(buffer, &client_addr, addr_len);
+        process_message(buffer, (struct sockaddr_in*)&their_addr, addr_len);
     }
     
     return 0;
@@ -232,6 +237,7 @@ void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* cli
             response += quote.name + " " + std::to_string(current_price) + "\n";
         }
         
+        // Sending messages via UDP - Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
         if (sendto(sockfd, response.c_str(), response.length(), 0,
                  (struct sockaddr *)client_addr, client_len) == -1) {
             perror("sendto");
@@ -258,6 +264,7 @@ void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* cli
         // Prepare response
         std::string response = stock_name + " " + std::to_string(current_price);
         
+        // Sending messages via UDP - Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
         if (sendto(sockfd, response.c_str(), response.length(), 0,
                  (struct sockaddr *)client_addr, client_len) == -1) {
             perror("sendto");
@@ -291,6 +298,7 @@ void handle_advance(const std::vector<std::string>& parts, struct sockaddr_in* c
                           std::to_string(quote.current_idx) + 
                           ", new price: " + std::to_string(quote.prices[quote.current_idx]);
     
+    // Sending messages via UDP - Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
     if (sendto(sockfd, response.c_str(), response.length(), 0,
              (struct sockaddr *)client_addr, client_len) == -1) {
         perror("sendto");

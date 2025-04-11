@@ -27,14 +27,16 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <algorithm>
 
 // Default values - replace XXX with your USC ID last 3 digits
 #define SERVER_IP "127.0.0.1"
-#define SERVER_PORT 45000
+#define SERVER_PORT 45654
 #define BUFFER_SIZE 1024
 
 // Global socket file descriptor for cleanup on exit
 int sockfd = -1;
+std::string current_username;
 
 // Function prototypes
 void sigint_handler(int sig);
@@ -45,7 +47,7 @@ std::vector<std::string> split_string(const std::string& str, char delimiter);
 int recv_with_retry(int sockfd, char* buffer, size_t buffer_size);
 bool send_with_retry(int sockfd, const char* data, size_t data_length);
 
-// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4
+// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4 (Signal Handling)
 void sigint_handler(int sig) {
     (void)sig;  // Explicitly cast to void to prevent unused parameter warning
     
@@ -61,7 +63,7 @@ void sigint_handler(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4
+    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4 (Signal Handling)
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
@@ -75,64 +77,69 @@ int main(int argc, char *argv[]) {
     
     printf("[Client] Registered signal handler for SIGINT\n");
     
-    struct sockaddr_in server_addr;
-    struct hostent *he;
-    int port = SERVER_PORT;
+    // Following Beej's Guide Section 5.1 (Client-Server Background) and Section 5.2 (A Simple Stream Client)
+    struct addrinfo hints, *servinfo, *p;
+    int rv;
+    char s[INET6_ADDRSTRLEN];
 
-    // Check for custom port argument
-    if (argc > 1) {
-        port = atoi(argv[1]);
-    }
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET; // Force IPv4
+    hints.ai_socktype = SOCK_STREAM;
 
-    // Create TCP socket - following Beej's Guide pattern
-    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        perror("socket");
-        fprintf(stderr, "[Client] Failed to create socket: %s\n", strerror(errno));
-        exit(1);
-    }
-    
-    // Set socket to non-blocking for better timeout control (Beej's section 7.1)
-    int flags = fcntl(sockfd, F_GETFL, 0);
-    if (flags == -1) {
-        perror("fcntl get");
-        close(sockfd);
-        exit(1);
-    }
-    
-    // Don't actually set non-blocking as it would require major code changes
-    // This is where we would add: fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
-    
-    printf("[Client] Socket created successfully (fd: %d)\n", sockfd);
-
-    // Get server info
-    if ((he = gethostbyname(SERVER_IP)) == NULL) {
-        perror("gethostbyname");
+    if ((rv = getaddrinfo(SERVER_IP, std::to_string(SERVER_PORT).c_str(), &hints, &servinfo)) != 0) {
+        fprintf(stderr, "[Client] getaddrinfo: %s\n", gai_strerror(rv));
         exit(1);
     }
 
-    // Setup server address struct
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    server_addr.sin_addr = *((struct in_addr *)he->h_addr);
+    // Loop through all the results and connect to the first we can - Following Beej's Guide Section 5.2
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("socket");
+            continue;
+        }
 
-    // Print connection details
-    printf("[Client] Attempting to connect to %s:%d\n", SERVER_IP, port);
-    
-    // Connect to server
-    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
-        perror("connect");
-        printf("[Client] Connection failed to %s:%d with sockfd %d\n", SERVER_IP, port, sockfd);
-        close(sockfd);
+        // Set socket to non-blocking for better timeout control - Following Beej's Guide Section 7.1 (Blocking)
+        int flags = fcntl(sockfd, F_GETFL, 0);
+        if (flags == -1) {
+            perror("fcntl get");
+            close(sockfd);
+            continue;
+        }
+        
+        // Don't actually set non-blocking as it would require major code changes
+        // This is where we would add: fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+
+        if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("connect");
+            continue;
+        }
+
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "[Client] Failed to connect to server\n");
         exit(1);
     }
 
-    // Get local port information
+    // Get server address info - Following Beej's Guide Section 5.1 (Client-Server Background)
+    char server_ip[INET6_ADDRSTRLEN];
+    inet_ntop(p->ai_family, &(((struct sockaddr_in*)p->ai_addr)->sin_addr),
+              server_ip, sizeof server_ip);
+    
+    printf("[Client] Connected to %s:%d\n", server_ip, SERVER_PORT);
+
+    // Get local port information - Following Beej's Guide Section 5.1 (Client-Server Background)
     struct sockaddr_in my_addr;
     socklen_t len = sizeof(my_addr);
-    getsockname(sockfd, (struct sockaddr*)&my_addr, &len);
-    
-    printf("[Client] Connected to Main Server using TCP on port %d\n", ntohs(my_addr.sin_port));
+    if (getsockname(sockfd, (struct sockaddr*)&my_addr, &len) == -1) {
+        perror("getsockname");
+    } else {
+        printf("[Client] Using local port %d\n", ntohs(my_addr.sin_port));
+    }
+
+    freeaddrinfo(servinfo);
 
     // User authentication
     if (authenticate(sockfd)) {
@@ -140,7 +147,7 @@ int main(int argc, char *argv[]) {
         handle_commands(sockfd);
     }
     
-    // Cleanup
+    // Cleanup - Following Beej's Guide Section 5.1 (Client-Server Background)
     close(sockfd);
     return 0;
 }
@@ -184,6 +191,7 @@ bool authenticate(int sockfd) {
     printf("[Client] Received auth response: %s (bytes: %d)\n", response.c_str(), bytes_received);
     
     if (response == "AUTH_SUCCESS") {
+        current_username = username;
         printf("[Client] You have been granted access.\n");
         return true;
     } else {
@@ -231,8 +239,17 @@ void process_command(int sockfd, const std::string& cmd) {
     
     // Handle different command types, all using the robust recv helper
     if (parts[0] == "quote") {
+        printf("[Client] Sent a quote request to the main server.\n");
+        
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
+        
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
+        int client_port = ntohs(client_addr.sin_port);
+        
+        printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
         printf("%s\n", buffer);
     }
     else if (parts[0] == "buy" && parts.size() == 3) {
@@ -246,11 +263,22 @@ void process_command(int sockfd, const std::string& cmd) {
             return;
         }
         
-        printf("%s\n", buffer);
-        printf("Confirm buy? (yes/no): ");
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
+        int client_port = ntohs(client_addr.sin_port);
+        
+        printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
+        printf("[Client] %s’s current price is $%.6f. Proceed to buy? (Y/N)\n", parts[1].c_str(), atof(strchr(buffer, '$') + 1));
         
         std::string confirm;
-        std::getline(std::cin, confirm);
+        while (true) {
+            std::getline(std::cin, confirm);
+            if (confirm == "Y" || confirm == "N") {
+                break;
+            }
+            printf("[Client] Invalid input. Please respond with 'Y' or 'N': ");
+        }
         
         // Send confirmation using robust helper
         if (!send_with_retry(sockfd, confirm.c_str(), confirm.length())) {
@@ -260,39 +288,78 @@ void process_command(int sockfd, const std::string& cmd) {
         // Get final response
         bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        printf("%s\n", buffer);
+        printf("[Client] %s successfully bought %d shares of %s.\n", current_username.c_str(), std::stoi(parts[2]), parts[1].c_str());
     }
     else if (parts[0] == "sell" && parts.size() == 3) {
-        // Similar to buy but check sufficient shares
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
         
-        // Check if error message
         if (strncmp(buffer, "ERROR", 5) == 0) {
-            printf("%s\n", buffer);
+            printf("[Client] Error: %s does not have enough shares of %s to sell. Please try again\n", current_username.c_str(), parts[1].c_str());
             return;
         }
         
-        printf("%s\n", buffer);
-        printf("Confirm sell? (yes/no): ");
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
+        int client_port = ntohs(client_addr.sin_port);
+        
+        printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
+        printf("[Client] %s’s current price is $%.6f. Proceed to sell? (Y/N)\n", parts[1].c_str(), atof(strchr(buffer, '$') + 1));
         
         std::string confirm;
-        std::getline(std::cin, confirm);
+        while (true) {
+            std::getline(std::cin, confirm);
+            if (confirm == "Y" || confirm == "N") {
+                break;
+            }
+            printf("[Client] Invalid input. Please respond with 'Y' or 'N': ");
+        }
         
-        // Send confirmation using robust helper
         if (!send_with_retry(sockfd, confirm.c_str(), confirm.length())) {
             return;
         }
         
-        // Get final response
         bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        printf("%s\n", buffer);
+        if (confirm == "Y") {
+            printf("[Client] %s successfully sold %d shares of %s.\n", current_username.c_str(), std::stoi(parts[2]), parts[1].c_str());
+        } else {
+            printf("[Client] Sale cancelled.\n");
+        }
     }
     else if (parts[0] == "position") {
+        printf("[Client] %s sent a position request to the main server.\n", current_username.c_str());
+        
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        printf("%s\n", buffer);
+        
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
+        int client_port = ntohs(client_addr.sin_port);
+        
+        printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
+
+        std::istringstream iss(buffer);
+        std::string line;
+        bool printed_header = false;
+
+        while (std::getline(iss, line)) {
+            if (line.find("Total unrealized gain/loss:") != std::string::npos) {
+                size_t pos = line.find('$');
+                if (pos != std::string::npos) {
+                    float profit = std::stof(line.substr(pos + 1));
+                    printf("[Client] %s’s current profit is $%.6f\n", current_username.c_str(), profit);
+                }
+            } else {
+                if (!printed_header) {
+                    printf("stock shares avg_buy_price\n");
+                    printed_header = true;
+                }
+                printf("%s\n", line.c_str());
+            }
+        }
     }
     else {
         // Unknown command or incorrect format
@@ -327,7 +394,7 @@ std::vector<std::string> split_string(const std::string& str, char delimiter) {
     return tokens;
 }
 
-// Helper function for robust receive with retry logic - as per Beej's Guide Section 7.4
+// Helper function for robust receive with retry logic - Following Beej's Guide Section 7.4 (Partial send()s)
 int recv_with_retry(int sockfd, char* buffer, size_t buffer_size) {
     int bytes_received;
     int total_bytes = 0;
@@ -369,7 +436,7 @@ int recv_with_retry(int sockfd, char* buffer, size_t buffer_size) {
     return total_bytes;
 }
 
-// Helper function for robust send with retry logic - as per Beej's Guide Section 7.4
+// Helper function for robust send with retry logic - Following Beej's Guide Section 7.4 (Partial send()s)
 bool send_with_retry(int sockfd, const char* data, size_t data_length) {
     int bytes_sent;
     int total_bytes = 0;

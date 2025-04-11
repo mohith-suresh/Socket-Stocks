@@ -26,6 +26,8 @@ This project implements a distributed stock trading system using C++ socket prog
 - **Portfolio Management**: View portfolio positions with current market values
 - **Trading Operations**: Buy and sell stocks with real-time price quotes
 - **Robust Communication**: Reliable message passing with error handling and retry logic
+- **Multiple Client Support**: Concurrent connections through forking in Server M
+- **Advanced Error Handling**: Comprehensive handling of all error conditions, including insufficient shares
 
 ## Technical Implementation
 
@@ -34,6 +36,8 @@ This project implements a distributed stock trading system using C++ socket prog
 - **Signal Handling**: Proper SIGINT handling with sigaction()
 - **Message Passing**: Robust send/receive functions with timeout and retry mechanisms
 - **Resource Management**: Proper socket cleanup and memory management
+- **Process Management**: Uses fork() for concurrent client handling in Server M
+- **Thread Safety**: Careful resource management with child processes
 
 ## Getting Started
 
@@ -70,6 +74,11 @@ After starting the servers, run the client:
 - Username: `user2`, Password: `sdvvzrug`
 - Username: `admin`, Password: `vhfuhwsdvv`
 
+For user1: enter pass456
+For user2: enter password
+For admin: enter secretpass
+
+
 ## Available Commands
 
 Once authenticated, the following commands are available:
@@ -90,6 +99,14 @@ Several test scripts are provided to verify system functionality:
 - `quote_test.sh`: Tests stock quote retrieval functionality
 - `debug_auth_test.sh`: Detailed authentication test with logging
 - `comprehensive_test.sh`: Full system test with all functionalities
+- `multiple_clients_test.sh`: Tests concurrent client connections with different users
+- `multiple_clients_test2.sh`: Simplified test for concurrent client connections
+- `parallel_buy_test.sh`: Tests parallel buy operations from multiple clients simultaneously
+- `insufficient_shares_test.sh`: Tests error handling when selling more shares than available
+- `multiple_and_error_test.sh`: Tests both multiple clients and error handling together
+- `multi_client_interaction_test.sh`: Tests multiple client connections with complex interaction sequences
+- `multi_client_direct_test.sh`: Tests multiple client interactions using direct command simulation
+- `simultaneous_transactions_test.sh`: Tests multiple clients performing transactions simultaneously
 
 ## Test Results
 
@@ -105,6 +122,9 @@ See the `test_results` directory for detailed test results and Beej's Guide comp
 - Proper resource cleanup to prevent memory leaks and socket exhaustion
 - Signal handling for graceful server shutdown
 - Socket options configured for optimal reliability
+- Process forking for concurrent client connections
+- Null termination in all error messages for reliable client communication
+- Graceful handling of insufficient shares during sell operations
 
 ## Project Files
 

@@ -1,7 +1,0 @@
-user1
-sdvv789
-buy S1 5
-yes
-sell S1 2
-yes
-exit

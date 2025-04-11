@@ -8,6 +8,9 @@
  * - Communicates with Server M via UDP
  */
 
+// Portions of this code are based on Beej's Guide to Network Programming (v3.2.1)
+// https://beej.us/guide/bgnet/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -28,7 +31,7 @@
 #include <iostream>
 
 // Default values - replace XXX with your USC ID last 3 digits
-#define SERVER_A_PORT 41000
+#define SERVER_A_PORT 41654
 #define BUFFER_SIZE 1024
 #define MEMBERS_FILE "members.txt"
 
@@ -43,12 +46,13 @@ void encrypt_password(char* password);
 std::vector<std::string> split_string(const std::string& str, char delimiter);
 void process_message(const char* message, struct sockaddr_in* client_addr, socklen_t client_len);
 
-// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4
+// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4 (Signal Handling)
 void sigint_handler(int sig) {
     (void)sig;  // Explicitly cast to void to prevent unused parameter warning
     
     printf("\n[Server A] Caught SIGINT signal, cleaning up and exiting...\n");
     
+    // Following Beej's Guide Section 5.9 (close() and shutdown())
     if (sockfd != -1) {
         printf("[Server A] Closing socket (fd: %d)...\n", sockfd);
         close(sockfd);
@@ -59,11 +63,11 @@ void sigint_handler(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4
+    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4 (Signal Handling)
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;    // Not using SA_RESTART to ensure interrupted system calls fail with EINTR
+    sa.sa_flags = SA_RESTART;  // Restart interrupted system calls
     
     if (sigaction(SIGINT, &sa, NULL) == -1) {
         perror("sigaction");
@@ -73,79 +77,86 @@ int main(int argc, char *argv[]) {
     
     printf("[Server A] Registered signal handler for SIGINT\n");
     
-    struct sockaddr_in my_addr;     // Server address
-    struct sockaddr_in client_addr; // Client address
-    socklen_t addr_len;
-    char buffer[BUFFER_SIZE];
-    int port = SERVER_A_PORT;
+    // Following Beej's Guide Section 5.3 (Datagram Sockets) for UDP server setup
+    struct addrinfo hints, *servinfo, *p;
+    int rv;
+    char s[INET6_ADDRSTRLEN];
 
-    // Check for custom port argument
-    if (argc > 1) {
-        port = atoi(argv[1]);
-    }
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET; // Force IPv4
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_flags = AI_PASSIVE; // Use my IP
 
-    // Create UDP socket - Following Beej's Guide Section 5.3
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
-        perror("socket");
-        fprintf(stderr, "[Server A] Failed to create UDP socket: %s\n", strerror(errno));
+    if ((rv = getaddrinfo(NULL, std::to_string(SERVER_A_PORT).c_str(), &hints, &servinfo)) != 0) {
+        fprintf(stderr, "[Server A] getaddrinfo: %s\n", gai_strerror(rv));
         exit(1);
     }
-    
-    // Allow port reuse - Following Beej's Guide Section 7.1
-    int yes = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-        perror("setsockopt SO_REUSEADDR");
-        fprintf(stderr, "[Server A] Failed to set SO_REUSEADDR option: %s\n", strerror(errno));
-        close(sockfd);
+
+    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.3
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("socket");
+            continue;
+        }
+
+        // Allow port reuse - Following Beej's Guide Section 7.1 (setsockopt())
+        int yes = 1;
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+            perror("setsockopt SO_REUSEADDR");
+            close(sockfd);
+            continue;
+        }
+
+        if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("bind");
+            continue;
+        }
+
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "[Server A] Failed to bind socket\n");
         exit(1);
     }
-    
-    // Set receive timeout - Following Beej's Guide Section 7.4
-    struct timeval tv;
-    tv.tv_sec = 5;  // 5 second timeout
-    tv.tv_usec = 0;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == -1) {
-        perror("setsockopt SO_RCVTIMEO");
-        // Non-fatal, just warn
-        fprintf(stderr, "[Server A] Warning: Failed to set SO_RCVTIMEO option: %s\n", strerror(errno));
-    }
+
+    freeaddrinfo(servinfo);
     
     printf("[Server A] Socket options set successfully\n");
-    
-    // Setup server address
-    memset(&my_addr, 0, sizeof(my_addr));
-    my_addr.sin_family = AF_INET;
-    my_addr.sin_port = htons(port);
-    my_addr.sin_addr.s_addr = INADDR_ANY;
-    
-    // Bind socket
-    if (bind(sockfd, (struct sockaddr *)&my_addr, sizeof(my_addr)) == -1) {
-        perror("bind");
-        exit(1);
-    }
     
     // Load member credentials
     load_members_file();
     
-    printf("[Server A] Booting up using UDP on port %d\n", port);
+    printf("[Server A] Booting up using UDP on port %d\n", SERVER_A_PORT);
     
-    // Main server loop
+    // Main server loop - recvfrom() usage following Beej's Guide Section 5.8
+    struct sockaddr_storage their_addr;
+    socklen_t addr_len;
+    char buffer[BUFFER_SIZE];
+    int numbytes;
+
     while (1) {
-        addr_len = sizeof(client_addr);
-        int bytes_received = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0,
-                                     (struct sockaddr *)&client_addr, &addr_len);
-        
-        if (bytes_received == -1) {
+        addr_len = sizeof their_addr;
+        if ((numbytes = recvfrom(sockfd, buffer, BUFFER_SIZE-1, 0,
+            (struct sockaddr *)&their_addr, &addr_len)) == -1) {
             perror("recvfrom");
             continue;
         }
-        
-        buffer[bytes_received] = '\0';
+
+        buffer[numbytes] = '\0';
         printf("[Server A] Received message: %s\n", buffer);
         
-        process_message(buffer, &client_addr, addr_len);
+        // Using inet_ntoa and ntohs for address printing (not from Beej's Guide)
+        struct sockaddr_in* client_addr = (struct sockaddr_in*)&their_addr;
+        printf("[Server A] Received from %s:%d\n", 
+               inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
+        
+        process_message(buffer, client_addr, addr_len);
     }
     
+    // Following Beej's Guide Section 5.9 (close() and shutdown())
+    close(sockfd);
     return 0;
 }
 
@@ -168,13 +179,8 @@ void load_members_file() {
         std::vector<std::string> parts = split_string(line, ' ');
         
         if (parts.size() == 2) {
-            // Store encrypted passwords
-            char password[BUFFER_SIZE];
-            strncpy(password, parts[1].c_str(), BUFFER_SIZE - 1);
-            password[BUFFER_SIZE - 1] = '\0';
-            encrypt_password(password);
-            
-            users[parts[0]] = password;
+            // Store encrypted passwords directly from file
+            users[parts[0]] = parts[1];
             count++;
         }
     }
@@ -248,6 +254,7 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
         printf("[Server A] Sending response '%s' to %s:%d\n", 
                response, inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
         
+        // Following Beej's Guide Section 5.8 (sendto — DGRAM-style)
         // Make sure to include the null terminator
         size_t response_len = strlen(response) + 1; // +1 for null terminator
         char* null_term_response = new char[response_len];

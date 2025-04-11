@@ -1,7 +1,7 @@
 [Client] Registered signal handler for SIGINT
 [Client] Socket created successfully (fd: 3)
 [Client] Attempting to connect to 127.0.0.1:45000
-[Client] Connected to Main Server using TCP on port 47030
+[Client] Connected to Main Server using TCP on port 45546
 [Client] Enter username: [Client] Username received: user1
 [Client] Enter password: [Client] Password received (length: 7)
 [Client] Sending auth message: AUTH user1 ******
@@ -19,4 +19,8 @@
   position - View your current portfolio
   exit - Logout and exit
 
-> 
+> [Client] Sending data: 'buy S1 5' (length: 8 + null = 9 bytes)
+BUY CONFIRM: S1 5 shares at $101.000000 = $505.000000
+Confirm buy? (yes/no): [Client] Sending data: 'yes' (length: 3 + null = 4 bytes)
+ADVANCED S1 to index 2, new price: 102.000000
+> [Client] Exiting...
