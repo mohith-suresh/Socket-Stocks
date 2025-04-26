@@ -1,15 +1,11 @@
-/**
- * serverQ.cpp - Quote Server for Stock Trading Simulation
- * EE450 Socket Programming Project
- * 
- * This server:
- * - Loads stock quotes from quotes.txt
- * - Provides current stock prices in response to quote requests
- * - Advances stock price index after buy/sell transactions
- * - Communicates with Server M via UDP
- */
+//  serverQ.cpp - Quote Server for Stock Trading Simulation
 
-// Portions of this code are based on Beej's Guide to Network Programming (v3.2.1)
+// - Loads stock quotes from quotes.txt
+// - Provides current stock prices in response to quote requests
+// - Advances stock price index after buy/sell transactions
+// - Communicates with Server M via UDP
+ 
+// Portions of this code are inspired on Beej's Guide to Network Programming 
 // https://beej.us/guide/bgnet/
 
 #include <stdio.h>
@@ -63,23 +59,17 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
 void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len);
 void handle_advance(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len);
 
-// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4 (Signal Handling)
+// catch ctrl+c, cleanup 
 void sigint_handler(int sig) {
-    (void)sig;  // Explicitly cast to void to prevent unused parameter warning
-    
-    printf("\n[Server Q] Caught SIGINT signal, cleaning up and exiting...\n");
-    
+    (void)sig;
     if (sockfd != -1) {
-        printf("[Server Q] Closing socket (fd: %d)...\n", sockfd);
         close(sockfd);
     }
-    
-    printf("[Server Q] Cleanup complete, exiting.\n");
     exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    // Graceful shutdown with SIGINT - Based on Beej's Guide Section 9.4 (Signal Handling)
+    // shutdown on sigint, exit
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
@@ -91,10 +81,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     
-    printf("[Server Q] Registered signal handler for SIGINT\n");
-    
-    // Setting up UDP socket with getaddrinfo, socket, and bind
-    // Based on Beej's Guide Section 5.3 (Datagram Sockets)
+    // setup udp socket (beej guide 6.3)
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
@@ -109,14 +96,14 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.3
+    // try bind first (beej guide 6.3)
     for(p = servinfo; p != NULL; p = p->ai_next) {
         if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("socket");
             continue;
         }
 
-        // Enabling SO_REUSEADDR - Based on Beej's Guide Section 7.1 (setsockopt())
+        // allow reuse addr (beej guide man pages 9.20)
         int yes = 1;
         if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
             perror("setsockopt SO_REUSEADDR");
@@ -140,14 +127,12 @@ int main(int argc, char *argv[]) {
 
     freeaddrinfo(servinfo);
     
-    printf("[Server Q] Socket options set successfully\n");
-    
     // Load quotes
     load_quotes_file();
     
     printf("[Server Q] Booting up using UDP on port %d\n", SERVER_Q_PORT);
     
-    // Main server loop - Following Beej's Guide Section 5.3 (Datagram Sockets)
+    // main loop recv/process (beej guide 6.3)
     struct sockaddr_storage their_addr;
     socklen_t addr_len;
     char buffer[BUFFER_SIZE];
@@ -155,7 +140,7 @@ int main(int argc, char *argv[]) {
 
     while (1) {
         addr_len = sizeof their_addr;
-        // Receiving messages via UDP - Based on Beej's Guide Section 5.8 (recvfrom — DGRAM-style)
+        // recvfrom loop (beej guide 5.8)
         if ((numbytes = recvfrom(sockfd, buffer, BUFFER_SIZE-1, 0,
             (struct sockaddr *)&their_addr, &addr_len)) == -1) {
             perror("recvfrom");
@@ -163,7 +148,6 @@ int main(int argc, char *argv[]) {
         }
 
         buffer[numbytes] = '\0';
-        printf("[Server Q] Received message: %s\n", buffer);
         
         process_message(buffer, (struct sockaddr_in*)&their_addr, addr_len);
     }
@@ -204,7 +188,6 @@ void load_quotes_file() {
     }
     
     file.close();
-    printf("[Server Q] Loaded %d stock quotes from %s\n", stock_count, QUOTES_FILE);
 }
 
 void process_message(const char* message, struct sockaddr_in* client_addr, socklen_t client_len) {
@@ -225,8 +208,8 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
 
 void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len) {
     if (parts.size() == 1) {
-        // Request for all stock quotes
-        printf("[Server Q] Processing request for all stock quotes\n");
+        // request all stock quotes
+        printf("[Server Q] Received a quote request from the main server.\n");
         
         std::string response;
         
@@ -237,17 +220,19 @@ void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* cli
             response += quote.name + " " + std::to_string(current_price) + "\n";
         }
         
-        // Sending messages via UDP - Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
+        // sendto response (beej guide 5.8)
         if (sendto(sockfd, response.c_str(), response.length(), 0,
                  (struct sockaddr *)client_addr, client_len) == -1) {
             perror("sendto");
         }
+        
+        printf("[Server Q] Returned all stock quotes.\n");
     } 
     else if (parts.size() == 2) {
-        // Request for specific stock quote
+        // request specific stock quote
         std::string stock_name = parts[1];
         
-        printf("[Server Q] Processing quote request for stock: %s\n", stock_name.c_str());
+        printf("[Server Q] Received a quote request from the main server for stock %s.\n", stock_name.c_str());
         
         // Check if stock exists
         if (stock_quotes.find(stock_name) == stock_quotes.end()) {
@@ -264,11 +249,13 @@ void handle_quote(const std::vector<std::string>& parts, struct sockaddr_in* cli
         // Prepare response
         std::string response = stock_name + " " + std::to_string(current_price);
         
-        // Sending messages via UDP - Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
+        // sendto response (beej guide 5.8)
         if (sendto(sockfd, response.c_str(), response.length(), 0,
                  (struct sockaddr *)client_addr, client_len) == -1) {
             perror("sendto");
         }
+        
+        printf("[Server Q] Returned the stock quote of %s.\n", stock_name.c_str());
     }
 }
 
@@ -298,7 +285,7 @@ void handle_advance(const std::vector<std::string>& parts, struct sockaddr_in* c
                           std::to_string(quote.current_idx) + 
                           ", new price: " + std::to_string(quote.prices[quote.current_idx]);
     
-    // Sending messages via UDP - Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
+    // sendto response (beej guide 5.8)
     if (sendto(sockfd, response.c_str(), response.length(), 0,
              (struct sockaddr *)client_addr, client_len) == -1) {
         perror("sendto");

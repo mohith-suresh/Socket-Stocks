@@ -1,14 +1,12 @@
-/**
- * serverM.cpp - Main Server for Stock Trading Simulation
- * EE450 Socket Programming Project
- * 
- * This main server:
- * - Handles TCP connections from clients
- * - Routes requests to appropriate backend servers via UDP
- * - Manages authentication, trading, and portfolio operations
- */
 
-// Portions of this code are based on Beej's Guide to Network Programming (v3.2.1)
+// serverM.cpp - Main Server for Stock Trading Simulation
+
+//  This main server:
+//  - Handles TCP connections from clients
+//  - Routes requests to appropriate backend servers via UDP
+//  - Manages authentication, trading, and portfolio operations
+ 
+// Portions of this code are inspired on Beej's Guide to Network Programming 
 // https://beej.us/guide/bgnet/
 
 #include <stdio.h>
@@ -30,20 +28,20 @@
 #include <fstream>
 #include <iostream>
 
-// Default values - replace XXX with your USC ID last 3 digits
+// Default values - last 3 digits of my USC ID is 654
 #define SERVER_A_PORT 41654
 #define SERVER_P_PORT 42654
 #define SERVER_Q_PORT 43654
 #define SERVER_M_UDP_PORT 44654
 #define SERVER_M_TCP_PORT 45654
-#define SERVER_IP "127.0.0.1"  // localhost for inter-server communication
+#define SERVER_IP "127.0.0.1" 
 #define BUFFER_SIZE 1024
 #define BACKLOG 10
 
 // Global socket file descriptors for cleanup
 int tcp_sockfd = -1;
 int udp_sockfd = -1;
-std::map<int, std::string> client_usernames; // Maps client sockets to usernames
+std::map<int, std::string> client_usernames;
 
 // Function prototypes
 void sigint_handler(int sig);
@@ -56,13 +54,13 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
 void handle_position(int client_sockfd);
 void handle_client(int client_sockfd);
 
-// Graceful cleanup on Ctrl+C (SIGINT) - Based on Beej's Guide Section 9.4 (Signal Handling)
+// Based on Beej's Guide Section 9.4 (Signal Handling)
 void sigint_handler(int sig) {
     (void)sig;  // Explicitly cast to void to prevent unused parameter warning
     
     printf("\n[Server M] Caught SIGINT signal, cleaning up and exiting...\n");
     
-    // Following Beej's Guide Section 5.9 (close() and shutdown())
+    // Beej's Guide Section 5.9 (close() and shutdown())
     if (tcp_sockfd != -1) {
         printf("[Server M] Closing TCP socket (fd: %d)...\n", tcp_sockfd);
         close(tcp_sockfd);
@@ -77,7 +75,7 @@ void sigint_handler(int sig) {
     exit(0);
 }
 
-// Password encryption function (offset by +3)
+// Password encryption (offset by +3)
 void encrypt_password(char* password) {
     for (int i = 0; password[i] != '\0'; i++) {
         if (isalpha(password[i])) {
@@ -87,16 +85,15 @@ void encrypt_password(char* password) {
         else if (isdigit(password[i])) {
             password[i] = ((password[i] - '0' + 3) % 10) + '0';
         }
-        // Special characters remain unchanged
     }
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4 (Signal Handling)
+    // sigaction() -  Beej's Guide Section 9.4 (Signal Handling)
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;  // Restart interrupted system calls
+    sa.sa_flags = SA_RESTART;  
     
     if (sigaction(SIGINT, &sa, NULL) == -1) {
         perror("sigaction");
@@ -106,30 +103,30 @@ int main(int argc, char *argv[]) {
     
     printf("[Server M] Registered signal handler for SIGINT\n");
     
-    // Setting up TCP socket using getaddrinfo, socket, bind, listen
-    // Based on Beej's Guide Sections 5.1 (Client-Server Background) and 5.2 (Simple Stream Server)
+    // Setting up TCP socket
+    // Beej's Guide Sections 5.1 and 5.2
     struct addrinfo tcp_hints, *tcp_servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
 
     memset(&tcp_hints, 0, sizeof tcp_hints);
-    tcp_hints.ai_family = AF_INET; // Force IPv4
+    tcp_hints.ai_family = AF_INET; 
     tcp_hints.ai_socktype = SOCK_STREAM;
-    tcp_hints.ai_flags = AI_PASSIVE; // Use my IP
+    tcp_hints.ai_flags = AI_PASSIVE; 
 
     if ((rv = getaddrinfo(NULL, std::to_string(SERVER_M_TCP_PORT).c_str(), &tcp_hints, &tcp_servinfo)) != 0) {
         fprintf(stderr, "[Server M] getaddrinfo: %s\n", gai_strerror(rv));
         exit(1);
     }
 
-    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.2
+    // Beej's Guide Section 5.2
     for(p = tcp_servinfo; p != NULL; p = p->ai_next) {
         if ((tcp_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("TCP socket");
             continue;
         }
 
-        // Allow port reuse - Following Beej's Guide Section 7.1 (setsockopt())
+        // Allow port reuse - Beej's Guide Section 7.1 (setsockopt())
         int yes = 1;
         if (setsockopt(tcp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
             perror("setsockopt SO_REUSEADDR");
@@ -166,9 +163,9 @@ int main(int argc, char *argv[]) {
     struct addrinfo udp_hints, *udp_servinfo;
     
     memset(&udp_hints, 0, sizeof udp_hints);
-    udp_hints.ai_family = AF_INET; // Force IPv4
+    udp_hints.ai_family = AF_INET; 
     udp_hints.ai_socktype = SOCK_DGRAM;
-    udp_hints.ai_flags = AI_PASSIVE; // Use my IP
+    udp_hints.ai_flags = AI_PASSIVE; 
 
     if ((rv = getaddrinfo(NULL, std::to_string(SERVER_M_UDP_PORT).c_str(), &udp_hints, &udp_servinfo)) != 0) {
         fprintf(stderr, "[Server M] getaddrinfo: %s\n", gai_strerror(rv));
@@ -176,14 +173,12 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.3
     for(p = udp_servinfo; p != NULL; p = p->ai_next) {
         if ((udp_sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("UDP socket");
             continue;
         }
 
-        // Allow port reuse - Following Beej's Guide Section 7.1 (setsockopt())
         int yes = 1;
         if (setsockopt(udp_sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
             perror("setsockopt SO_REUSEADDR");
@@ -210,7 +205,6 @@ int main(int argc, char *argv[]) {
     
     printf("[Server M] UDP socket setup complete, bound to port %d\n", SERVER_M_UDP_PORT);
     
-    // Print startup message with more details - Following Beej's Guide Section 5.1 (Client-Server Background)
     struct sockaddr_in tcp_actual;
     socklen_t tcp_len = sizeof(tcp_actual);
     if (getsockname(tcp_sockfd, (struct sockaddr*)&tcp_actual, &tcp_len) == -1) {
@@ -222,13 +216,13 @@ int main(int argc, char *argv[]) {
         printf("[Server M] TCP IP binding: %s\n", inet_ntoa(tcp_actual.sin_addr));
     }
     
-    // Main server loop - Following Beej's Guide Section 5.2 (A Simple Stream Server)
+    // Main server loop , Following Beej's Guide Section 5.2 (A Simple Stream Server)
     struct sockaddr_storage their_addr;
     socklen_t sin_size = sizeof their_addr;
     char client_ip[INET_ADDRSTRLEN];
     
     while (1) {
-        // Accepting new TCP connection - Based on Beej's Guide Section 5.2
+        // Accepting new TCP connection , Based on Beej's Guide Section 5.2
         int client_sockfd = accept(tcp_sockfd, (struct sockaddr *)&their_addr, &sin_size);
         if (client_sockfd == -1) {
             perror("accept");
@@ -241,7 +235,7 @@ int main(int argc, char *argv[]) {
         printf("[Server M] New connection from %s:%d\n", 
                client_ip, ntohs(((struct sockaddr_in*)&their_addr)->sin_port));
         
-        // Forking a child process to handle client - Based on Beej's Guide Section 5.2
+        // Forking a child process to handle client, Beej's Guide Section 5.2
         pid_t child_pid = fork();
         if (child_pid == -1) {
             perror("fork");
@@ -250,18 +244,17 @@ int main(int argc, char *argv[]) {
         }
         
         if (child_pid == 0) {  // Child process
-            close(tcp_sockfd);  // Child doesn't need the listener
+            close(tcp_sockfd);  // Child don't need the listener
             handle_client(client_sockfd);
             close(client_sockfd);
             exit(0);
         }
         
         // Parent process
-        close(client_sockfd);  // Parent doesn't need this
+        close(client_sockfd);
         
-        // Cleaning up zombie child processes - Based on Beej's Guide Section 5.2
         while (waitpid(-1, NULL, WNOHANG) > 0) {
-            // Keep cleaning up zombies
+
         }
     }
     
@@ -353,8 +346,6 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     printf("[Server M] Server A address set to %s:%d\n", SERVER_IP, SERVER_A_PORT);
     
     // Sending AUTH request to Server A using UDP
-    // Based on Beej's Guide Section 5.8 (sendto — DGRAM-style)
-    // Note: null-termination of messages is project-specific
     if (sendto(udp_sockfd, auth_message.c_str(), auth_message.length(), 0,
                (struct sockaddr *)&server_a_addr, sizeof(server_a_addr)) == -1) {
         perror("sendto");
@@ -362,7 +353,7 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     }
     
     // Receiving AUTH response from Server A using UDP
-    // Based on Beej's Guide Section 5.8 (recvfrom — DGRAM-style)
+    //  Beej's Guide Section  5.8
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
     int bytes_received;
@@ -380,14 +371,13 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
            ntohs(from_addr.sin_port),
            buffer);
     
-    // Process Server A's response
+    // Process Server A response
     if (strcmp(buffer, "AUTH_SUCCESS") == 0) {
         printf("[Server M] Authentication successful for user %s\n", username.c_str());
         const char* success_msg = "AUTH_SUCCESS";
         printf("[Server M] Sending AUTH_SUCCESS to client (fd: %d)\n", client_sockfd);
         
-        // Make sure to send null-terminated string
-        size_t msg_len = strlen(success_msg) + 1; // +1 for null terminator
+        size_t msg_len = strlen(success_msg) + 1;
         char* null_term_response = new char[msg_len];
         strcpy(null_term_response, success_msg);
         
@@ -406,8 +396,7 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
         const char* error_msg = "AUTH_FAILED";
         printf("[Server M] Sending AUTH_FAILED to client (fd: %d)\n", client_sockfd);
         
-        // Make sure to send null-terminated string
-        size_t msg_len = strlen(error_msg) + 1; // +1 for null terminator
+        size_t msg_len = strlen(error_msg) + 1;
         char* null_term_response = new char[msg_len];
         strcpy(null_term_response, error_msg);
         
@@ -429,7 +418,6 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
-    
     struct sockaddr_in server_q_addr;
     char buffer[BUFFER_SIZE];
     
@@ -439,13 +427,13 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
     // Prepare message for Server Q
     std::string quote_message = "QUOTE " + stock_name;
     
-    // Set up address for Server Q
+    // Set up address , for Server Q
     memset(&server_q_addr, 0, sizeof(server_q_addr));
     server_q_addr.sin_family = AF_INET;
     server_q_addr.sin_port = htons(SERVER_Q_PORT);
     server_q_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
-    // Send to Server Q
+    // Send - to Server Q
     if (sendto(udp_sockfd, quote_message.c_str(), quote_message.length(), 0,
               (struct sockaddr *)&server_q_addr, sizeof(server_q_addr)) == -1) {
         perror("sendto Server Q");
@@ -469,8 +457,7 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
     
     buffer[bytes_received] = '\0';
     
-    // Forward response to client with null terminator
-    size_t resp_len = strlen(buffer) + 1; // +1 for null terminator
+    size_t resp_len = strlen(buffer) + 1; 
     char* null_term_resp = new char[resp_len];
     strcpy(null_term_resp, buffer);
     
@@ -486,7 +473,6 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
 void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares) {
     if (client_usernames.find(client_sockfd) == client_usernames.end()) {
         const char* error_msg = "ERROR: Not authenticated";
-        // Include null terminator
         send(client_sockfd, error_msg, strlen(error_msg) + 1, 0);
         return;
     }
@@ -496,16 +482,16 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     printf("[Server M] Received buy request: %s %d shares\n", stock_name.c_str(), num_shares);
     
-    // First, get current price from Server Q
+    // getting current price from Server Q
     std::string quote_message = "QUOTE " + stock_name;
     
-    // Set up address for Server Q
+    // Set address for Server Q
     memset(&server_q_addr, 0, sizeof(server_q_addr));
     server_q_addr.sin_family = AF_INET;
     server_q_addr.sin_port = htons(SERVER_Q_PORT);
     server_q_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
-    // Send to Server Q (include null terminator)
+    // Send to Server Q 
     size_t quote_len = quote_message.length() + 1;
     char* null_term_quote = new char[quote_len];
     strcpy(null_term_quote, quote_message.c_str());
@@ -514,13 +500,13 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
               (struct sockaddr *)&server_q_addr, sizeof(server_q_addr)) == -1) {
         perror("sendto Server Q");
         const char* error_msg = "ERROR: Failed to get quote for buy";
-        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0);
         delete[] null_term_quote;
         return;
     }
     delete[] null_term_quote;
     
-    // Receive quote from Server Q
+    // Receive quote -from Server Q
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
     int bytes_received;
@@ -529,39 +515,39 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
         perror("recvfrom Server Q");
         const char* error_msg = "ERROR: Failed to get quote for buy";
-        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); 
         return;
     }
     
     buffer[bytes_received] = '\0';
     
-    // If stock doesn't exist or error
+    // stock doesn't exist or Error
     if (strncmp(buffer, "ERROR", 5) == 0) {
-        send(client_sockfd, buffer, strlen(buffer) + 1, 0); // Include null terminator
+        send(client_sockfd, buffer, strlen(buffer) + 1, 0);
         return;
     }
     
-    // Parse the price from Server Q's response
+    // Parse price from Server Q response
     std::string response(buffer);
     std::vector<std::string> parts = split_string(response, ' ');
     
     if (parts.size() < 2) {
         const char* error_msg = "ERROR: Invalid quote response";
-        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0);
         return;
     }
     
     double current_price = std::stod(parts[1]);
     double total_cost = current_price * num_shares;
     
-    // Ask client for confirmation
+    // ask client for confirmation
     std::string confirm_msg = "BUY CONFIRM: " + stock_name + " " + 
                              std::to_string(num_shares) + " shares at $" + 
                              std::to_string(current_price) + " = $" + 
                              std::to_string(total_cost);
     
-    // Make sure to include the null terminator
-    size_t msg_len = confirm_msg.length() + 1; // +1 for null terminator
+    // making sure to include the null terminator
+    size_t msg_len = confirm_msg.length() + 1; 
     char* null_term_msg = new char[msg_len];
     strcpy(null_term_msg, confirm_msg.c_str());
     
@@ -576,7 +562,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     }
     delete[] null_term_msg;
     
-    // Get client confirmation
+    // getting client confirmation
     if ((bytes_received = recv(client_sockfd, buffer, BUFFER_SIZE - 1, 0)) <= 0) {
         if (bytes_received == 0) {
             printf("[Server M] Client disconnected during buy confirmation\n");
@@ -592,7 +578,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     if (confirmation != "yes" && confirmation != "YES" && confirmation != "y" && confirmation != "Y") {
         const char* cancel_msg = "Buy transaction cancelled";
-        send(client_sockfd, cancel_msg, strlen(cancel_msg) + 1, 0); // Include null terminator
+        send(client_sockfd, cancel_msg, strlen(cancel_msg) + 1, 0); 
         return;
     }
     
@@ -611,7 +597,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     printf("[Server M] Sending buy request to Server P: '%s'\n", buy_message.c_str());
     
-    // Send to Server P (include null terminator)
+    // Send to Server P
     size_t buy_len = buy_message.length() + 1;
     char* null_term_buy = new char[buy_len];
     strcpy(null_term_buy, buy_message.c_str());
@@ -620,7 +606,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr)) == -1) {
         perror("sendto Server P");
         const char* error_msg = "ERROR: Failed to process buy";
-        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); 
         delete[] null_term_buy;
         return;
     }
@@ -633,7 +619,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
         perror("recvfrom Server P");
         const char* error_msg = "ERROR: Failed to confirm buy";
-        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); // Include null terminator
+        send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); 
         return;
     }
     
@@ -643,7 +629,6 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     // Advance stock price in Server Q
     std::string advance_message = "ADVANCE " + stock_name;
     
-    // Include null terminator
     size_t adv_len = advance_message.length() + 1;
     char* null_term_adv = new char[adv_len];
     strcpy(null_term_adv, advance_message.c_str());
@@ -659,7 +644,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     delete[] null_term_adv;
     
     // Forward Server P's response to client with null terminator
-    size_t resp_len = strlen(buffer) + 1; // +1 for null terminator
+    size_t resp_len = strlen(buffer) + 1; 
     char* null_term_resp = new char[resp_len];
     strcpy(null_term_resp, buffer);
     
@@ -684,7 +669,6 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     
     printf("[Server M] Received sell request: %s %d shares\n", stock_name.c_str(), num_shares);
     
-    // First, get current price from Server Q
     std::string quote_message = "QUOTE " + stock_name;
     
     // Set up address for Server Q
@@ -737,7 +721,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     double current_price = std::stod(parts[1]);
     printf("[Server M] Parsed current price for %s: $%.2f\n", stock_name.c_str(), current_price);
     
-    // Now check if user has enough shares with Server P
+    // check if user has enough shares with Server P
     std::string username = client_usernames[client_sockfd];
     std::string check_message = "CHECK " + username + " " + stock_name + " " + std::to_string(num_shares);
     
@@ -776,8 +760,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     if (strcmp(buffer, "INSUFFICIENT_SHARES") == 0) {
         const char* error_msg = "ERROR: You do not have enough shares to sell";
         
-        // Make sure to include the null terminator
-        size_t error_len = strlen(error_msg) + 1; // +1 for null terminator
+        size_t error_len = strlen(error_msg) + 1;
         char* null_term_error = new char[error_len];
         strcpy(null_term_error, error_msg);
         
@@ -799,8 +782,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
                              std::to_string(current_price) + " = $" + 
                              std::to_string(total_value);
     
-    // Make sure to include the null terminator
-    size_t msg_len = confirm_msg.length() + 1; // +1 for null terminator
+    size_t msg_len = confirm_msg.length() + 1;
     char* null_term_msg = new char[msg_len];
     strcpy(null_term_msg, confirm_msg.c_str());
     
@@ -830,8 +812,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     if (confirmation != "yes" && confirmation != "YES" && confirmation != "y" && confirmation != "Y") {
         const char* cancel_msg = "Sell transaction cancelled";
         
-        // Make sure to include the null terminator
-        size_t msg_len = strlen(cancel_msg) + 1; // +1 for null terminator
+        size_t msg_len = strlen(cancel_msg) + 1; 
         char* null_term_msg = new char[msg_len];
         strcpy(null_term_msg, cancel_msg);
         
@@ -852,7 +833,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     
     printf("[Server M] Sending sell request to Server P: '%s'\n", sell_message.c_str());
     
-    // Send to Server P (include null terminator)
+    // Send to Server P 
     size_t sell_len = sell_message.length() + 1;
     char* null_term_sell = new char[sell_len];
     strcpy(null_term_sell, sell_message.c_str());
@@ -862,7 +843,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
         perror("sendto Server P");
         const char* error_msg = "ERROR: Failed to process sell";
         
-        // Make sure to include the null terminator
+
         size_t error_len = strlen(error_msg) + 1;
         char* null_term_error = new char[error_len];
         strcpy(null_term_error, error_msg);
@@ -882,7 +863,6 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
         perror("recvfrom Server P");
         const char* error_msg = "ERROR: Failed to confirm sell";
         
-        // Make sure to include the null terminator
         size_t error_len = strlen(error_msg) + 1;
         char* null_term_error = new char[error_len];
         strcpy(null_term_error, error_msg);
@@ -898,7 +878,6 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     // Advance stock price in Server Q
     std::string advance_message = "ADVANCE " + stock_name;
     
-    // Include null terminator
     size_t advance_len = advance_message.length() + 1;
     char* null_term_advance = new char[advance_len];
     strcpy(null_term_advance, advance_message.c_str());
@@ -913,8 +892,8 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     }
     delete[] null_term_advance;
     
-    // Forward Server P's response to client with null terminator
-    size_t resp_len = strlen(buffer) + 1; // +1 for null terminator
+    // Forward Server P's response to client
+    size_t resp_len = strlen(buffer) + 1; 
     char* null_term_resp = new char[resp_len];
     strcpy(null_term_resp, buffer);
     
@@ -1064,8 +1043,8 @@ void handle_position(int client_sockfd) {
     snprintf(profit_line, sizeof(profit_line), "Total unrealized gain/loss: $%.6f", total_gain);
     result += std::string(profit_line);
     
-    // Send result to client with null terminator
-    size_t result_len = result.length() + 1; // +1 for null terminator
+    // Send result to client
+    size_t result_len = result.length() + 1;
     char* null_term_result = new char[result_len];
     strcpy(null_term_result, result.c_str());
     

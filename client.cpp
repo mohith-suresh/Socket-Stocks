@@ -1,14 +1,15 @@
-/**
- * client.cpp - Stock Trading Simulation Client
- * EE450 Socket Programming Project
- * 
- * This client provides a command-line interface for:
- * - User authentication
- * - Stock quote retrieval
- * - Buying/selling stocks
- * - Portfolio checking
- * - Logging out
- */
+//  client.cpp - Stock Trading Simulation Client
+
+// This client provides a command line interface for:
+// - User authentication
+// - Stock quote retrieval
+// - Buying/selling stocks
+// - Portfolio checking
+// - Logging out
+ 
+// Portions of this code are inspired on Beej's Guide to Network Programming 
+// https://beej.us/guide/bgnet/
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,16 +30,15 @@
 #include <vector>
 #include <algorithm>
 
-// Default values - replace XXX with your USC ID last 3 digits
+//My last 3 digits of USC ID is 654
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 45654
 #define BUFFER_SIZE 1024
 
-// Global socket file descriptor for cleanup on exit
 int sockfd = -1;
 std::string current_username;
 
-// Function prototypes
+// funcs we use
 void sigint_handler(int sig);
 bool authenticate(int sockfd);
 void handle_commands(int sockfd);
@@ -47,23 +47,20 @@ std::vector<std::string> split_string(const std::string& str, char delimiter);
 int recv_with_retry(int sockfd, char* buffer, size_t buffer_size);
 bool send_with_retry(int sockfd, const char* data, size_t data_length);
 
-// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4 (Signal Handling)
+// Handle Ctrl+C.. cleanup before exit
 void sigint_handler(int sig) {
-    (void)sig;  // Explicitly cast to void to prevent unused parameter warning
-    
-    printf("\n[Client] Caught SIGINT signal, cleaning up and exiting...\n");
-    
+    (void)sig; // just ignore warning for unused sig
+    printf("\n[Client] Got SIGINT (Ctrl+C), doing cleanup then exit..\n");
     if (sockfd != -1) {
         printf("[Client] Closing socket (fd: %d)...\n", sockfd);
         close(sockfd);
     }
-    
-    printf("[Client] Cleanup complete, exiting.\n");
+    printf("[Client] Cleanup done, bye!\n");
     exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4 (Signal Handling)
+    // set up Ctrl+C handler
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
@@ -77,7 +74,6 @@ int main(int argc, char *argv[]) {
     
     printf("[Client] Registered signal handler for SIGINT\n");
     
-    // Following Beej's Guide Section 5.1 (Client-Server Background) and Section 5.2 (A Simple Stream Client)
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
@@ -91,23 +87,18 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // Loop through all the results and connect to the first we can - Following Beej's Guide Section 5.2
+    // Try all results, connect to first that works (Beej's Guide 6.2)
     for(p = servinfo; p != NULL; p = p->ai_next) {
         if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("socket");
             continue;
         }
-
-        // Set socket to non-blocking for better timeout control - Following Beej's Guide Section 7.1 (Blocking)
         int flags = fcntl(sockfd, F_GETFL, 0);
         if (flags == -1) {
             perror("fcntl get");
             close(sockfd);
             continue;
         }
-        
-        // Don't actually set non-blocking as it would require major code changes
-        // This is where we would add: fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
 
         if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
             close(sockfd);
@@ -123,14 +114,14 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // Get server address info - Following Beej's Guide Section 5.1 (Client-Server Background)
+    // Get server's IP addr (Beej's Guide 6.2)
     char server_ip[INET6_ADDRSTRLEN];
     inet_ntop(p->ai_family, &(((struct sockaddr_in*)p->ai_addr)->sin_addr),
               server_ip, sizeof server_ip);
     
     printf("[Client] Connected to %s:%d\n", server_ip, SERVER_PORT);
 
-    // Get local port information - Following Beej's Guide Section 5.1 (Client-Server Background)
+    // Get which local port we got
     struct sockaddr_in my_addr;
     socklen_t len = sizeof(my_addr);
     if (getsockname(sockfd, (struct sockaddr*)&my_addr, &len) == -1) {
@@ -141,13 +132,12 @@ int main(int argc, char *argv[]) {
 
     freeaddrinfo(servinfo);
 
-    // User authentication
+    // login bit
     if (authenticate(sockfd)) {
-        // Main command loop
+        // command loop
         handle_commands(sockfd);
     }
-    
-    // Cleanup - Following Beej's Guide Section 5.1 (Client-Server Background)
+    // close up shop (Beej's Guide 5.9)
     close(sockfd);
     return 0;
 }
@@ -164,20 +154,20 @@ bool authenticate(int sockfd) {
     std::getline(std::cin, password);
     printf("[Client] Password received (length: %zu)\n", password.length());
     
-    // Create authentication message
+    // Make auth msg to send
     std::string auth_msg = "AUTH " + username + " " + password;
     printf("[Client] Sending auth message: AUTH %s ******\n", username.c_str());
     printf("[Client] Auth message length: %zu bytes\n", auth_msg.length());
     
-    // Send credentials to server using our robust helper
+    // Send creds to server (with our retry thing)
     if (!send_with_retry(sockfd, auth_msg.c_str(), auth_msg.length())) {
         printf("[Client] Failed to send authentication message\n");
         return false;
     }
     printf("[Client] Auth message sent successfully, waiting for response...\n");
     
-    // Get response using our robust helper function
-    printf("[Client] Attempting to receive auth response...\n");
+    // Wait for auth reply
+    printf("[Client] Trying to get auth response...\n");
     int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
     
     if (bytes_received <= 0) {
@@ -232,12 +222,12 @@ void process_command(int sockfd, const std::string& cmd) {
         return;
     }
     
-    // Send command to server using our robust helper
+    // Send cmd to server (with retry)
     if (!send_with_retry(sockfd, cmd.c_str(), cmd.length())) {
         return;
     }
     
-    // Handle different command types, all using the robust recv helper
+    // Handle all commands, all use recv_with_retry
     if (parts[0] == "quote") {
         printf("[Client] Sent a quote request to the main server.\n");
         
@@ -253,11 +243,11 @@ void process_command(int sockfd, const std::string& cmd) {
         printf("%s\n", buffer);
     }
     else if (parts[0] == "buy" && parts.size() == 3) {
-        // Receive price confirmation
+        // get price confirm
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
         
-        // Check if error message
+        // see if error
         if (strncmp(buffer, "ERROR", 5) == 0) {
             printf("%s\n", buffer);
             return;
@@ -280,12 +270,12 @@ void process_command(int sockfd, const std::string& cmd) {
             printf("[Client] Invalid input. Please respond with 'Y' or 'N': ");
         }
         
-        // Send confirmation using robust helper
+        // send confirm (Y/N)
         if (!send_with_retry(sockfd, confirm.c_str(), confirm.length())) {
             return;
         }
         
-        // Get final response
+        // get final reply
         bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
         printf("[Client] %s successfully bought %d shares of %s.\n", current_username.c_str(), std::stoi(parts[2]), parts[1].c_str());
@@ -362,16 +352,16 @@ void process_command(int sockfd, const std::string& cmd) {
         }
     }
     else {
-        // Unknown command or incorrect format
-        printf("[Client] ERROR: Unknown command or invalid format: '%s'\n", cmd.c_str());
-        printf("[Client] Please try one of the available commands.\n");
-        
-        // Check if the server sent any response
+        //  wrong format
+        printf("[Client] ERROR: Unknown command or bad format: '%s'\n", cmd.c_str());
+        printf("[Client] Try again with a real command.\n");
+
+        // maybe server sent something anyway, let's peek for a sec
         struct timeval tv;
-        tv.tv_sec = 1;  // 1 second timeout
+        tv.tv_sec = 1; 
         tv.tv_usec = 0;
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        
+
         int bytes_received = recv(sockfd, buffer, BUFFER_SIZE - 1, 0);
         if (bytes_received > 0) {
             buffer[bytes_received] = '\0';
@@ -394,99 +384,85 @@ std::vector<std::string> split_string(const std::string& str, char delimiter) {
     return tokens;
 }
 
-// Helper function for robust receive with retry logic - Following Beej's Guide Section 7.4 (Partial send()s)
+// recv_with_retry: try to receive, retry a bit if interrupted
 int recv_with_retry(int sockfd, char* buffer, size_t buffer_size) {
     int bytes_received;
     int total_bytes = 0;
-    int max_attempts = 5;  // Retry a few times in case of interrupted system calls
-    
+    int max_attempts = 5;  // try a few times if we get interrupted
     for (int attempt = 0; attempt < max_attempts; attempt++) {
         bytes_received = recv(sockfd, buffer + total_bytes, buffer_size - 1 - total_bytes, 0);
-        
         if (bytes_received == -1) {
             if (errno == EINTR) {
-                // Interrupted system call, retry
+                // got interrupted, try again
                 printf("[Client] recv() interrupted, retrying...\n");
                 continue;
             } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Timeout occurred
+                // timed out
                 printf("[Client] recv() timed out\n");
                 return -1;
             } else {
-                // Some other error
+                // something else broke
                 perror("recv");
                 return -1;
             }
         } else if (bytes_received == 0) {
-            // Server closed connection
+            // server closed it
             printf("[Client] Server closed connection\n");
             return 0;
         }
-        
         total_bytes += bytes_received;
-        
-        // If we received a terminating character, we're done
-        // This depends on your protocol - here we assume messages are null-terminated or newline-terminated
+        // If got null or newline, done (depends on protocol, but works for us)
         if (buffer[total_bytes-1] == '\0' || buffer[total_bytes-1] == '\n') {
             break;
         }
     }
-    
-    buffer[total_bytes] = '\0';  // Ensure null-termination
+    buffer[total_bytes] = '\0'; 
     return total_bytes;
 }
 
-// Helper function for robust send with retry logic - Following Beej's Guide Section 7.4 (Partial send()s)
+// send_with_retry: send all data, retry if interrupted (Beej's Guide 7.4)
 bool send_with_retry(int sockfd, const char* data, size_t data_length) {
     int bytes_sent;
     int total_bytes = 0;
-    int max_attempts = 5;  // Retry a few times in case of interrupted system calls
+    int max_attempts = 5;  
     
-    // Create a properly null-terminated string (even if already null-terminated)
     char* null_terminated_data = new char[data_length + 1];
     memcpy(null_terminated_data, data, data_length);
     null_terminated_data[data_length] = '\0';
-    
-    printf("[Client] Sending data: '%s' (length: %zu + null = %zu bytes)\n", 
+    printf("[Client] Sending data: '%s' (length: %zu + null = %zu bytes)\n",
            null_terminated_data, data_length, data_length + 1);
-    
-    // Include null terminator in the send operation
+    // send the null too
     size_t full_length = data_length + 1;
-    
     while (total_bytes < (int)full_length) {
         for (int attempt = 0; attempt < max_attempts; attempt++) {
             bytes_sent = send(sockfd, null_terminated_data + total_bytes, full_length - total_bytes, 0);
-            
             if (bytes_sent == -1) {
                 if (errno == EINTR) {
-                    // Interrupted system call, retry
+                    // got interrupted, try again
                     printf("[Client] send() interrupted, retrying...\n");
                     continue;
                 } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // Would block, try again later
+                    // would block, try again in a sec
                     printf("[Client] send() would block, retrying...\n");
-                    usleep(100000);  // Sleep for 100ms before retry
+                    usleep(100000);  // sleep 100ms
                     continue;
                 } else {
-                    // Some other error
+                    // borked
                     perror("send");
                     delete[] null_terminated_data;
                     return false;
                 }
             }
-            
             total_bytes += bytes_sent;
-            break;  // Exit attempt loop on success
+            break; // got some out, break attempt loop
         }
-        
-        // If we still haven't made progress after all attempts
+        // if still stuck after all tries
         if (total_bytes < (int)full_length && bytes_sent <= 0) {
             printf("[Client] Failed to send data after multiple attempts\n");
             delete[] null_terminated_data;
             return false;
         }
     }
-    
     delete[] null_terminated_data;
     return true;
 }

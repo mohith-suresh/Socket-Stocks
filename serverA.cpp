@@ -1,15 +1,12 @@
-/**
- * serverA.cpp - Authentication Server for Stock Trading Simulation
- * EE450 Socket Programming Project
- * 
- * This server:
- * - Loads user credentials from members.txt
- * - Authenticates users by comparing encrypted credentials
- * - Communicates with Server M via UDP
- */
+//  serverA.cpp - Authentication Server for Stock Trading Simulation
 
-// Portions of this code are based on Beej's Guide to Network Programming (v3.2.1)
-// https://beej.us/guide/bgnet/
+// This server:
+// - Loads user credentials from members.txt
+// - Authenticates users by comparing encrypted credentials
+// - Communicates with Server M via UDP
+
+// Portions of this code are inspired on Beej guide
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,28 +43,24 @@ void encrypt_password(char* password);
 std::vector<std::string> split_string(const std::string& str, char delimiter);
 void process_message(const char* message, struct sockaddr_in* client_addr, socklen_t client_len);
 
-// Signal handler for Ctrl+C - Following Beej's Guide Section 9.4 (Signal Handling)
+// handle ctrl+c (beej guide man pages 9.4)
 void sigint_handler(int sig) {
-    (void)sig;  // Explicitly cast to void to prevent unused parameter warning
+    (void)sig;  
     
-    printf("\n[Server A] Caught SIGINT signal, cleaning up and exiting...\n");
-    
-    // Following Beej's Guide Section 5.9 (close() and shutdown())
+    // Following Beej's Guide Man Pages 9.4 (close())
     if (sockfd != -1) {
-        printf("[Server A] Closing socket (fd: %d)...\n", sockfd);
         close(sockfd);
     }
     
-    printf("[Server A] Cleanup complete, exiting.\n");
     exit(0);
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handler with sigaction() - Following Beej's Guide Section 9.4 (Signal Handling)
+    // register sigint handler (beej guide)
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
     sigemptyset(&sa.sa_mask);
-    sa.sa_flags = SA_RESTART;  // Restart interrupted system calls
+    sa.sa_flags = SA_RESTART;  
     
     if (sigaction(SIGINT, &sa, NULL) == -1) {
         perror("sigaction");
@@ -75,9 +68,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     
-    printf("[Server A] Registered signal handler for SIGINT\n");
-    
-    // Following Beej's Guide Section 5.3 (Datagram Sockets) for UDP server setup
+    // udp server setup (beej guide, 6.3)
     struct addrinfo hints, *servinfo, *p;
     int rv;
     char s[INET6_ADDRSTRLEN];
@@ -92,14 +83,14 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // Loop through all the results and bind to the first we can - Following Beej's Guide Section 5.3
+    // try bind to first addr (beej guide, 6.3)
     for(p = servinfo; p != NULL; p = p->ai_next) {
         if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
             perror("socket");
             continue;
         }
 
-        // Allow port reuse - Following Beej's Guide Section 7.1 (setsockopt())
+        // allow sock reuse (beej guide man pages 9.20)
         int yes = 1;
         if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
             perror("setsockopt SO_REUSEADDR");
@@ -123,14 +114,12 @@ int main(int argc, char *argv[]) {
 
     freeaddrinfo(servinfo);
     
-    printf("[Server A] Socket options set successfully\n");
-    
-    // Load member credentials
+    // load users
     load_members_file();
     
     printf("[Server A] Booting up using UDP on port %d\n", SERVER_A_PORT);
     
-    // Main server loop - recvfrom() usage following Beej's Guide Section 5.8
+    // listen for msgs (beej guide, 6.3)
     struct sockaddr_storage their_addr;
     socklen_t addr_len;
     char buffer[BUFFER_SIZE];
@@ -145,17 +134,15 @@ int main(int argc, char *argv[]) {
         }
 
         buffer[numbytes] = '\0';
-        printf("[Server A] Received message: %s\n", buffer);
         
-        // Using inet_ntoa and ntohs for address printing (not from Beej's Guide)
+        // print client addr, port (beej guide)
         struct sockaddr_in* client_addr = (struct sockaddr_in*)&their_addr;
-        printf("[Server A] Received from %s:%d\n", 
-               inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
         
         process_message(buffer, client_addr, addr_len);
     }
     
-    // Following Beej's Guide Section 5.9 (close() and shutdown())
+    // cleanup socket (beej guide  9.4)
+    // Following Beej's Guide 9.4 (close())
     close(sockfd);
     return 0;
 }
@@ -186,20 +173,13 @@ void load_members_file() {
     }
     
     file.close();
-    printf("[Server A] Loaded %d user credentials from %s\n", count, MEMBERS_FILE);
 }
 
 void process_message(const char* message, struct sockaddr_in* client_addr, socklen_t client_len) {
     std::string msg(message);
     std::vector<std::string> parts = split_string(msg, ' ');
     
-    printf("[Server A] Processing message: '%s' (length: %zu)\n", message, strlen(message));
-    printf("[Server A] Received from %s:%d\n", 
-           inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
-    printf("[Server A] Parsed into %zu parts\n", parts.size());
-    
     if (parts.size() < 1) {
-        printf("[Server A] Warning: Message has no parts, ignoring\n");
         return;
     }
     
@@ -208,8 +188,7 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
         std::string username = parts[1];
         std::string password = parts[2];
         
-        printf("[Server A] Received AUTH request for username '%s' with password '%s'\n", 
-               username.c_str(), password.c_str());
+        printf("[Server A] Received username %s and password ******.\n", username.c_str());
         
         // Convert username to lowercase for case-insensitive comparison
         std::string lowercase_username = username;
@@ -220,7 +199,6 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
         // Check if user exists and password matches
         bool authenticated = false;
         
-        printf("[Server A] Checking against %zu stored credentials\n", users.size());
         for (const auto& user : users) {
             std::string stored_username = user.first;
             
@@ -230,12 +208,8 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
                 c = tolower(c);
             }
             
-            printf("[Server A] Checking against user '%s' with stored encrypted password '%s'\n", 
-                   stored_username.c_str(), user.second.c_str());
-            
             if (lowercase_username == lowercase_stored && password == user.second) {
                 authenticated = true;
-                printf("[Server A] Match found!\n");
                 break;
             }
         }
@@ -247,34 +221,21 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
             printf("[Server A] Member %s has been authenticated.\n", username.c_str());
         } else {
             response = "AUTH_FAILED";
-            printf("[Server A] The username %s or password '%s' is incorrect.\n", 
-                  username.c_str(), password.c_str());
+            printf("[Server A] The username %s or password ****** is incorrect.\n", username.c_str());
         }
         
-        printf("[Server A] Sending response '%s' to %s:%d\n", 
-               response, inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port));
-        
-        // Following Beej's Guide Section 5.8 (sendto — DGRAM-style)
-        // Make sure to include the null terminator
-        size_t response_len = strlen(response) + 1; // +1 for null terminator
+        // sendto dgram style (beej guide, 6.3)
+        size_t response_len = strlen(response) + 1; 
         char* null_term_response = new char[response_len];
         strcpy(null_term_response, response);
-        
-        printf("[Server A] Message with null: '%s' (length: %zu)\n", null_term_response, response_len);
         
         int send_result = sendto(sockfd, null_term_response, response_len, 0,
                              (struct sockaddr *)client_addr, client_len);
         if (send_result == -1) {
             perror("sendto");
-            printf("[Server A] Failed to send response: %s\n", strerror(errno));
-        } else {
-            printf("[Server A] Successfully sent %d bytes (including null terminator)\n", send_result);
         }
         
         delete[] null_term_response;
-    } else {
-        printf("[Server A] Received unknown message type: %s (parts: %zu)\n", 
-               parts[0].c_str(), parts.size());
     }
 }
 
