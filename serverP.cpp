@@ -228,6 +228,10 @@ void process_message(const char* message, struct sockaddr_in* client_addr, sockl
         
         handle_portfolio(parts, client_addr, client_len);
     }
+    else if (parts[0] == "N") {
+        printf("[Server P] Sale Denied \n");
+        fflush(stdout);            
+    }
     else {
         
     }
@@ -280,7 +284,6 @@ void handle_buy(const std::vector<std::string>& parts, struct sockaddr_in* clien
 }
 
 void handle_sell(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len) {
-    printf("[Server P] Received a sell request from the main server.\n");
     std::string username = parts[1];
     std::string stock_name = parts[2];
     int num_shares = std::stoi(parts[3]);
@@ -299,22 +302,21 @@ void handle_sell(const std::vector<std::string>& parts, struct sockaddr_in* clie
     if (portfolio.find(stock_name) == portfolio.end() || 
         portfolio[stock_name].shares < num_shares) {
         printf("[Server P] Stock %s does not have enough shares in %s's portfolio. Unable to sell %d shares of %s.\n", stock_name.c_str(), username.c_str(), num_shares, stock_name.c_str());
-        { 
-          std::ofstream log("server.logs", std::ios::app);
-          log << "[Server P] Stock " << stock_name 
-              << " does not have enough shares in " << username 
-              << "'s portfolio. Unable to sell " << num_shares 
-              << " shares of " << stock_name << ".\n";
-        }
         const char* response = "ERROR: Insufficient shares";
         sendto(sockfd, response, strlen(response), 0,
              (struct sockaddr *)client_addr, client_len);
         return;
     }
     
-    printf("[Server P] Stock %s has sufficient shares in %s's portfolio. Requesting users’ confirmation for selling stock.\n", stock_name.c_str(), username.c_str());
-    // Simulate user confirmation (for demonstration, assume always 'Y')
-    char user_confirmation = 'Y'; // This would realistically come from user input
+    // printf("[Server P] Waiting for sell confirmation via UDP...\n");
+    char user_confirmation = 'Y';
+    // socklen_t addrlen = client_len;
+    // if (recvfrom(sockfd, &user_confirmation, 1, 0,
+    //              (struct sockaddr *)client_addr, &addrlen) == -1) {
+    //     perror("recvfrom confirmation");
+    //     return;
+    // }
+    // printf("[Server P] Received confirmation byte: '%c' (0x%02x)\n", user_confirmation, (unsigned char)user_confirmation);
     
     if (user_confirmation == 'Y' || user_confirmation == 'y') {
         printf("[Server P] User approves selling the stock.\n");
@@ -346,6 +348,55 @@ void handle_sell(const std::vector<std::string>& parts, struct sockaddr_in* clie
     }
 }
 
+// void handle_sell(const std::vector<std::string> &p,
+//     sockaddr_in *from, socklen_t from_len) {
+// const std::string &user  = p[1];
+// const std::string &stock = p[2];
+// int    shares = std::stoi(p[3]);
+// double price  = std::stod(p[4]);
+
+// /* portfolio lookup */
+// if (user_portfolios.find(user) == user_portfolios.end() ||
+// user_portfolios[user].find(stock) == user_portfolios[user].end() ||
+// user_portfolios[user][stock].shares < shares) {
+// printf("[Server P] Stock %s does not have enough shares in %s's portfolio. "
+//   "Unable to sell %d shares of %s.\n",
+//   stock.c_str(), user.c_str(), shares, stock.c_str());
+// sendto(sockfd, "INSUFFICIENT_SHARES", 20, 0,
+//   (sockaddr *)from, from_len);
+// return;
+// }
+
+// printf("[Server P] Stock %s has sufficient shares in %s's portfolio. "
+// "Requesting users’ confirmation for selling stock.\n",
+// stock.c_str(), user.c_str());
+// sendto(sockfd, "OK", 3, 0, (sockaddr *)from, from_len);
+
+// /* wait for single-byte Y/N */
+// char c;
+// if (recvfrom(sockfd, &c, 1, 0,
+//     (sockaddr *)from, &from_len) <= 0)
+// return;
+
+// if (c == 'Y' || c == 'y') {
+// printf("[Server P] User approves selling the stock.\n");
+// auto &hold = user_portfolios[user][stock];
+// hold.shares -= shares;
+
+// printf("[Server P] Successfully sold %d shares of %s and updated %s's portfolio.\n",
+//   shares, stock.c_str(), user.c_str());
+
+// std::string reply = "SOLD " + std::to_string(shares) +
+//                " " + stock;
+// sendto(sockfd, reply.c_str(), reply.size() + 1, 0,
+//   (sockaddr *)from, from_len);
+// } else {
+// printf("[Server P] Sell denied.\n");
+// sendto(sockfd, "SELL_DENIED", 12, 0,
+//   (sockaddr *)from, from_len);
+// }
+// }
+
 void handle_check_shares(const std::vector<std::string>& parts, struct sockaddr_in* client_addr, socklen_t client_len) {
     std::string username = parts[1];
     std::string stock_name = parts[2];
@@ -354,7 +405,7 @@ void handle_check_shares(const std::vector<std::string>& parts, struct sockaddr_
     
     // Check if user exists
     if (user_portfolios.find(username) == user_portfolios.end()) {
-        printf("[Server P] Stock %s does not have enough shares in %s's portfolio. Unable to sell %d shares of %s.\n", stock_name.c_str(), username.c_str(), num_shares, stock_name.c_str());
+        printf("[Server P] Stock %s does not have enough sharess in %s's portfolio. Unable to sell %d shares of %s.\n", stock_name.c_str(), username.c_str(), num_shares, stock_name.c_str());
         const char* response = "INSUFFICIENT_SHARES";
         sendto(sockfd, response, strlen(response), 0,
              (struct sockaddr *)client_addr, client_len);
@@ -362,11 +413,14 @@ void handle_check_shares(const std::vector<std::string>& parts, struct sockaddr_
     }
     
     Portfolio& portfolio = user_portfolios[username];
+
+    
+    printf("[Server P] Received a sell request from the main server.\n");
     
     // Check if user has enough shares
     if (portfolio.find(stock_name) == portfolio.end() || 
         portfolio[stock_name].shares < num_shares) {
-            printf("[Server P] Stock %s does not have enough shares in %s's portfolio. Unable to sell %d shares of %s.\n", stock_name.c_str(), username.c_str(), num_shares, stock_name.c_str());
+            printf("[Server P] Stock %s does not have enough sharessss in %s's portfolio. Unable to sell %d shares of %s.\n", stock_name.c_str(), username.c_str(), num_shares, stock_name.c_str());
         const char* response = "INSUFFICIENT_SHARES";
         sendto(sockfd, response, strlen(response), 0,
              (struct sockaddr *)client_addr, client_len);
@@ -374,7 +428,8 @@ void handle_check_shares(const std::vector<std::string>& parts, struct sockaddr_
     }
     
     // User has enough shares
-    
+    printf("[Server P] Stock %s has sufficient shares in %s's portfolio. Requesting users’ confirmation for selling stock.\n", stock_name.c_str(), username.c_str());
+
     const char* response = "SUFFICIENT_SHARES";
     sendto(sockfd, response, strlen(response), 0,
          (struct sockaddr *)client_addr, client_len);

@@ -60,6 +60,7 @@ void sigint_handler(int sig) {
 }
 
 int main(int argc, char *argv[]) {
+    printf("[Client] Booting up.\n");
     // set up Ctrl+C handler
     struct sigaction sa;
     sa.sa_handler = sigint_handler;
@@ -71,8 +72,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "[Client] Failed to register SIGINT handler: %s\n", strerror(errno));
         exit(1);
     }
-    
-    printf("[Client] Registered signal handler for SIGINT\n");
     
     struct addrinfo hints, *servinfo, *p;
     int rv;
@@ -118,17 +117,6 @@ int main(int argc, char *argv[]) {
     char server_ip[INET6_ADDRSTRLEN];
     inet_ntop(p->ai_family, &(((struct sockaddr_in*)p->ai_addr)->sin_addr),
               server_ip, sizeof server_ip);
-    
-    printf("[Client] Connected to %s:%d\n", server_ip, SERVER_PORT);
-
-    // Get which local port we got
-    struct sockaddr_in my_addr;
-    socklen_t len = sizeof(my_addr);
-    if (getsockname(sockfd, (struct sockaddr*)&my_addr, &len) == -1) {
-        perror("getsockname");
-    } else {
-        printf("[Client] Using local port %d\n", ntohs(my_addr.sin_port));
-    }
 
     freeaddrinfo(servinfo);
 
@@ -143,43 +131,25 @@ int main(int argc, char *argv[]) {
 }
 
 bool authenticate(int sockfd) {
+    printf("[Client] Logging in.\n");
     char buffer[BUFFER_SIZE];
     std::string username, password;
-    
-    printf("[Client] Enter username: ");
+    printf(" Please enter the username: ");
     std::getline(std::cin, username);
-    printf("[Client] Username received: %s\n", username.c_str());
-    
-    printf("[Client] Enter password: ");
+    printf(" Please enter the password: ");
     std::getline(std::cin, password);
-    printf("[Client] Password received (length: %zu)\n", password.length());
-    
-    // Make auth msg to send
     std::string auth_msg = "AUTH " + username + " " + password;
-    printf("[Client] Sending auth message: AUTH %s ******\n", username.c_str());
-    printf("[Client] Auth message length: %zu bytes\n", auth_msg.length());
-    
-    // Send creds to server (with our retry thing)
     if (!send_with_retry(sockfd, auth_msg.c_str(), auth_msg.length())) {
         printf("[Client] Failed to send authentication message\n");
         return false;
     }
-    printf("[Client] Auth message sent successfully, waiting for response...\n");
-    
-    // Wait for auth reply
-    printf("[Client] Trying to get auth response...\n");
     int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
-    
     if (bytes_received <= 0) {
         printf("[Client] No valid authentication response received (bytes: %d)\n", bytes_received);
-        // Error already reported by recv_with_retry
         return false;
     }
-    
     buffer[bytes_received] = '\0'; // Ensure null termination
     std::string response(buffer);
-    printf("[Client] Received auth response: %s (bytes: %d)\n", response.c_str(), bytes_received);
-    
     if (response == "AUTH_SUCCESS") {
         current_username = username;
         printf("[Client] You have been granted access.\n");
@@ -192,24 +162,14 @@ bool authenticate(int sockfd) {
 
 void handle_commands(int sockfd) {
     std::string command;
-    
-    printf("[Client] Available commands:\n");
-    printf("  quote - Show all stock prices\n");
-    printf("  quote <stock> - Show specific stock price\n");
-    printf("  buy <stock> <shares> - Buy shares of a stock\n");
-    printf("  sell <stock> <shares> - Sell shares of a stock\n");
-    printf("  position - View your current portfolio\n");
-    printf("  exit - Logout and exit\n\n");
-    
+    printf("[Client] Please enter the command:\n\n");
+    printf("<quote>\n\n<quote <stock name>>\n\n<buy <stock name> <number of shares>>\n\n<sell <stock name> <number of shares>>\n\n<position>\n\n<exit>\n\n");
     while (true) {
         printf("> ");
         std::getline(std::cin, command);
-        
         if (command == "exit") {
-            printf("[Client] Exiting...\n");
             break;
         }
-        
         process_command(sockfd, command);
     }
 }
@@ -217,50 +177,55 @@ void handle_commands(int sockfd) {
 void process_command(int sockfd, const std::string& cmd) {
     char buffer[BUFFER_SIZE];
     std::vector<std::string> parts = split_string(cmd, ' ');
-    
     if (parts.empty()) {
         return;
     }
-    
-    // Send cmd to server (with retry)
     if (!send_with_retry(sockfd, cmd.c_str(), cmd.length())) {
         return;
     }
-    
-    // Handle all commands, all use recv_with_retry
     if (parts[0] == "quote") {
         printf("[Client] Sent a quote request to the main server.\n");
-        
+
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        
+
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
         getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
         int client_port = ntohs(client_addr.sin_port);
-        
+
+        bool is_error = strncmp(buffer, "ERROR", 5) == 0;
+        bool specific = (parts.size() == 2);   /* quote <stock> */
+
         printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
-        printf("%s\n", buffer);
+
+        if (is_error) {
+            /* spec: "<stock> does not exist. Please try again." */
+            printf("%s does not exist. Please try again.\n", specific ? parts[1].c_str() : "");
+            printf("—Start a new request—\n");
+        } else {
+            printf("%s\n", buffer);
+            if (specific)
+                printf("—Start a new request—\n");
+            else
+                printf("—--Start a new request—--\n");
+        }
+        return;
     }
     else if (parts[0] == "buy" && parts.size() == 3) {
-        // get price confirm
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        
-        // see if error
         if (strncmp(buffer, "ERROR", 5) == 0) {
-            printf("%s\n", buffer);
+            printf("[Client] Error: stock name does not exist. Please check again.\n");
+            printf("—Start a new request—\n");
             return;
         }
-        
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
         getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
         int client_port = ntohs(client_addr.sin_port);
-        
         printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
         printf("[Client] %s’s current price is $%.6f. Proceed to buy? (Y/N)\n", parts[1].c_str(), atof(strchr(buffer, '$') + 1));
-        
         std::string confirm;
         while (true) {
             std::getline(std::cin, confirm);
@@ -269,34 +234,38 @@ void process_command(int sockfd, const std::string& cmd) {
             }
             printf("[Client] Invalid input. Please respond with 'Y' or 'N': ");
         }
-        
-        // send confirm (Y/N)
         if (!send_with_retry(sockfd, confirm.c_str(), confirm.length())) {
             return;
         }
-        
-        // get final reply
         bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        printf("[Client] %s successfully bought %d shares of %s.\n", current_username.c_str(), std::stoi(parts[2]), parts[1].c_str());
+        if (confirm == "Y") {
+            printf("[Client] %s successfully bought %d shares of %s.\n", current_username.c_str(), std::stoi(parts[2]), parts[1].c_str());
+            printf("—-Start a new request—-\n");
+        }else{
+            printf("—-Start a new request—-\n");
+        }
+        
     }
     else if (parts[0] == "sell" && parts.size() == 3) {
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        
         if (strncmp(buffer, "ERROR", 5) == 0) {
-            printf("[Client] Error: %s does not have enough shares of %s to sell. Please try again\n", current_username.c_str(), parts[1].c_str());
+            if (strstr(buffer, "not found")) {
+                printf("[Client] Error: stock name does not exist. Please check again.\n");
+            } else {
+                printf("[Client] Error: %s does not have enough shares of %s to sell. Please try again\n",
+                       current_username.c_str(), parts[1].c_str());
+            }
+            printf("—Start a new request—\n");
             return;
         }
-        
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
         getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
         int client_port = ntohs(client_addr.sin_port);
-        
         printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
         printf("[Client] %s’s current price is $%.6f. Proceed to sell? (Y/N)\n", parts[1].c_str(), atof(strchr(buffer, '$') + 1));
-        
         std::string confirm;
         while (true) {
             std::getline(std::cin, confirm);
@@ -305,42 +274,38 @@ void process_command(int sockfd, const std::string& cmd) {
             }
             printf("[Client] Invalid input. Please respond with 'Y' or 'N': ");
         }
-        
         if (!send_with_retry(sockfd, confirm.c_str(), confirm.length())) {
             return;
         }
-        
         bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
         if (confirm == "Y") {
             printf("[Client] %s successfully sold %d shares of %s.\n", current_username.c_str(), std::stoi(parts[2]), parts[1].c_str());
-        } else {
-            printf("[Client] Sale cancelled.\n");
+            printf("—-Start a new request—-\n");
+        }else{
+            printf("—-Start a new request—-\n");
         }
+        // If confirm == "N", do not print anything
     }
     else if (parts[0] == "position") {
         printf("[Client] %s sent a position request to the main server.\n", current_username.c_str());
-        
         int bytes_received = recv_with_retry(sockfd, buffer, BUFFER_SIZE);
         if (bytes_received <= 0) return;
-        
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
         getsockname(sockfd, (struct sockaddr*)&client_addr, &client_len);
         int client_port = ntohs(client_addr.sin_port);
-        
         printf("[Client] Received the response from the main server using TCP over port %d.\n", client_port);
-
         std::istringstream iss(buffer);
         std::string line;
         bool printed_header = false;
-
         while (std::getline(iss, line)) {
             if (line.find("Total unrealized gain/loss:") != std::string::npos) {
                 size_t pos = line.find('$');
                 if (pos != std::string::npos) {
                     float profit = std::stof(line.substr(pos + 1));
                     printf("[Client] %s’s current profit is $%.6f\n", current_username.c_str(), profit);
+                    printf("—-Start a new request—-\n");
                 }
             } else {
                 if (!printed_header) {
@@ -352,21 +317,7 @@ void process_command(int sockfd, const std::string& cmd) {
         }
     }
     else {
-        //  wrong format
-        printf("[Client] ERROR: Unknown command or bad format: '%s'\n", cmd.c_str());
-        printf("[Client] Try again with a real command.\n");
-
-        // maybe server sent something anyway, let's peek for a sec
-        struct timeval tv;
-        tv.tv_sec = 1; 
-        tv.tv_usec = 0;
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-        int bytes_received = recv(sockfd, buffer, BUFFER_SIZE - 1, 0);
-        if (bytes_received > 0) {
-            buffer[bytes_received] = '\0';
-            printf("[Client] Server response: %s\n", buffer);
-        }
+        printf("[Client] Error: stock name/shares are required. Please specify a stock name to %s.\n", parts[0]=="buy"?"buy":"sell");
     }
 }
 
@@ -394,11 +345,9 @@ int recv_with_retry(int sockfd, char* buffer, size_t buffer_size) {
         if (bytes_received == -1) {
             if (errno == EINTR) {
                 // got interrupted, try again
-                printf("[Client] recv() interrupted, retrying...\n");
                 continue;
             } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // timed out
-                printf("[Client] recv() timed out\n");
                 return -1;
             } else {
                 // something else broke
@@ -424,13 +373,10 @@ int recv_with_retry(int sockfd, char* buffer, size_t buffer_size) {
 bool send_with_retry(int sockfd, const char* data, size_t data_length) {
     int bytes_sent;
     int total_bytes = 0;
-    int max_attempts = 5;  
-    
+    int max_attempts = 5;
     char* null_terminated_data = new char[data_length + 1];
     memcpy(null_terminated_data, data, data_length);
     null_terminated_data[data_length] = '\0';
-    printf("[Client] Sending data: '%s' (length: %zu + null = %zu bytes)\n",
-           null_terminated_data, data_length, data_length + 1);
     // send the null too
     size_t full_length = data_length + 1;
     while (total_bytes < (int)full_length) {

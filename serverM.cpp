@@ -54,13 +54,12 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
 void handle_position(int client_sockfd);
 void handle_client(int client_sockfd);
 
-// Based on Beej's Guide Section 9.4 (Signal Handling)
 void sigint_handler(int sig) {
     (void)sig;  // Explicitly cast to void to prevent unused parameter warning
     
     printf("\n[Server M] Caught SIGINT signal, cleaning up and exiting...\n");
     
-    // Beej's Guide Section 5.9 (close() and shutdown())
+
     if (tcp_sockfd != -1) {
         printf("[Server M] Closing TCP socket (fd: %d)...\n", tcp_sockfd);
         close(tcp_sockfd);
@@ -156,7 +155,7 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
     
-    printf("[Server M] TCP socket setup complete, listening on port %d\n", SERVER_M_TCP_PORT);
+    // [Removed TCP socket setup print]
 
     // Setting up UDP socket using getaddrinfo and bind
     // Based on Beej's Guide Section 5.3 (Datagram Sockets)
@@ -203,18 +202,10 @@ int main(int argc, char *argv[]) {
 
     freeaddrinfo(udp_servinfo);
     
-    printf("[Server M] UDP socket setup complete, bound to port %d\n", SERVER_M_UDP_PORT);
+    // [Removed UDP socket setup print]
     
-    struct sockaddr_in tcp_actual;
-    socklen_t tcp_len = sizeof(tcp_actual);
-    if (getsockname(tcp_sockfd, (struct sockaddr*)&tcp_actual, &tcp_len) == -1) {
-        perror("getsockname");
-    } else {
-        printf("[Server M] Booting up using TCP on port %d (actual: %d) and UDP on port %d\n", 
-               SERVER_M_TCP_PORT, ntohs(tcp_actual.sin_port), SERVER_M_UDP_PORT);
-        printf("[Server M] TCP socket fd: %d, UDP socket fd: %d\n", tcp_sockfd, udp_sockfd);
-        printf("[Server M] TCP IP binding: %s\n", inet_ntoa(tcp_actual.sin_addr));
-    }
+    // Print bootup message after UDP bind succeeds (spec-compliant)
+    printf("[Server M] Booting up using UDP on port %d.\n", SERVER_M_UDP_PORT);
     
     // Main server loop , Following Beej's Guide Section 5.2 (A Simple Stream Server)
     struct sockaddr_storage their_addr;
@@ -228,13 +219,10 @@ int main(int argc, char *argv[]) {
             perror("accept");
             continue;
         }
-        
         // Convert client IP to string for logging
         inet_ntop(AF_INET, &(((struct sockaddr_in*)&their_addr)->sin_addr),
                   client_ip, INET_ADDRSTRLEN);
-        printf("[Server M] New connection from %s:%d\n", 
-               client_ip, ntohs(((struct sockaddr_in*)&their_addr)->sin_port));
-        
+        // [Spec: Remove connection notice print]
         // Forking a child process to handle client, Beej's Guide Section 5.2
         pid_t child_pid = fork();
         if (child_pid == -1) {
@@ -242,19 +230,15 @@ int main(int argc, char *argv[]) {
             close(client_sockfd);
             continue;
         }
-        
         if (child_pid == 0) {  // Child process
             close(tcp_sockfd);  // Child don't need the listener
             handle_client(client_sockfd);
             close(client_sockfd);
             exit(0);
         }
-        
         // Parent process
         close(client_sockfd);
-        
         while (waitpid(-1, NULL, WNOHANG) > 0) {
-
         }
     }
     
@@ -322,8 +306,7 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     struct sockaddr_in server_a_addr;
     char buffer[BUFFER_SIZE];
     
-    printf("[Server M] Received authentication request for user %s with password length %zu\n", 
-           username.c_str(), password.length());
+    printf("[Server M] Received username %s and password ****.\n", username.c_str());
     
     // Encrypt password
     char enc_pass[BUFFER_SIZE];
@@ -331,19 +314,13 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
     enc_pass[BUFFER_SIZE - 1] = '\0';
     encrypt_password(enc_pass);
     
-    printf("[Server M] Encrypted password for authentication: %s\n", enc_pass);
-    
     // Prepare message for Server A
     std::string auth_message = "AUTH " + username + " " + enc_pass;
-    printf("[Server M] Prepared auth message for Server A: %s (length: %zu)\n", 
-           auth_message.c_str(), auth_message.length());
-    
     // Set up address for Server A
     memset(&server_a_addr, 0, sizeof(server_a_addr));
     server_a_addr.sin_family = AF_INET;
     server_a_addr.sin_port = htons(SERVER_A_PORT);
     server_a_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
-    printf("[Server M] Server A address set to %s:%d\n", SERVER_IP, SERVER_A_PORT);
     
     // Sending AUTH request to Server A using UDP
     if (sendto(udp_sockfd, auth_message.c_str(), auth_message.length(), 0,
@@ -351,6 +328,7 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
         perror("sendto");
         return false;
     }
+    printf("[Server M] Sent the authentication request to Server A\n");
     
     // Receiving AUTH response from Server A using UDP
     //  Beej's Guide Section  5.8
@@ -363,50 +341,26 @@ bool handle_authentication(int client_sockfd, const std::string& username, const
         perror("recvfrom");
         return false;
     }
-    
     buffer[bytes_received] = '\0';
-    printf("[Server M] Received %d bytes from %s:%d: %s\n", 
-           bytes_received, 
-           inet_ntoa(from_addr.sin_addr), 
-           ntohs(from_addr.sin_port),
-           buffer);
+    printf("[Server M] Received the response from server A using UDP over %d\n", SERVER_M_UDP_PORT);
     
     // Process Server A response
     if (strcmp(buffer, "AUTH_SUCCESS") == 0) {
-        printf("[Server M] Authentication successful for user %s\n", username.c_str());
         const char* success_msg = "AUTH_SUCCESS";
-        printf("[Server M] Sending AUTH_SUCCESS to client (fd: %d)\n", client_sockfd);
-        
         size_t msg_len = strlen(success_msg) + 1;
         char* null_term_response = new char[msg_len];
         strcpy(null_term_response, success_msg);
-        
         int send_res = send(client_sockfd, null_term_response, msg_len, 0);
-        if (send_res == -1) {
-            perror("send to client");
-            printf("[Server M] Failed to send AUTH_SUCCESS to client: %s\n", strerror(errno));
-            delete[] null_term_response;
-            return false;
-        }
-        printf("[Server M] Successfully sent %d bytes to client\n", send_res);
+        printf("[Server M] Sent the response from server A to the client using TCP over port %d.\n", SERVER_M_TCP_PORT);
         delete[] null_term_response;
         return true;
     } else {
-        printf("[Server M] Authentication failed for user %s\n", username.c_str());
         const char* error_msg = "AUTH_FAILED";
-        printf("[Server M] Sending AUTH_FAILED to client (fd: %d)\n", client_sockfd);
-        
         size_t msg_len = strlen(error_msg) + 1;
         char* null_term_response = new char[msg_len];
         strcpy(null_term_response, error_msg);
-        
         int send_res = send(client_sockfd, null_term_response, msg_len, 0);
-        if (send_res == -1) {
-            perror("send to client");
-            printf("[Server M] Failed to send AUTH_FAILED to client: %s\n", strerror(errno));
-        } else {
-            printf("[Server M] Successfully sent %d bytes to client\n", send_res);
-        }
+        printf("[Server M] Sent the response from server A to the client using TCP over port %d.\n", SERVER_M_TCP_PORT);
         delete[] null_term_response;
         return false;
     }
@@ -421,8 +375,11 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
     struct sockaddr_in server_q_addr;
     char buffer[BUFFER_SIZE];
     
-    printf("[Server M] Received quote request for %s\n", 
-           stock_name.empty() ? "all stocks" : stock_name.c_str());
+    printf("[Server M] Received a quote request from %s%s%s, using TCP over port %d.\n",
+           client_usernames[client_sockfd].c_str(),
+           stock_name.empty() ? "" : " for stock ",
+           stock_name.empty() ? "" : stock_name.c_str(),
+           SERVER_M_TCP_PORT);
     
     // Prepare message for Server Q
     std::string quote_message = "QUOTE " + stock_name;
@@ -441,6 +398,8 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
+    printf("[Server M] Sent quote request to server Q.\n");
+    printf("[Server M] Forwarded the quote request to server Q.\n");
     
     // Receive response from Server Q
     struct sockaddr_in from_addr;
@@ -454,6 +413,8 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
+    printf("[Server M] Received quote response from server Q.\n");
+    printf("[Server M] Received the quote response from server Q using UDP over %d\n", SERVER_M_UDP_PORT);
     
     buffer[bytes_received] = '\0';
     
@@ -465,7 +426,7 @@ void handle_quote(int client_sockfd, const std::string& stock_name) {
     if (send_res == -1) {
         perror("send quote result to client");
     } else {
-        printf("[Server M] Successfully sent %d bytes of quote data\n", send_res);
+        printf("[Server M] Forwarded the quote response to the client.\n");
     }
     delete[] null_term_resp;
 }
@@ -480,7 +441,8 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     struct sockaddr_in server_q_addr;
     char buffer[BUFFER_SIZE];
     
-    printf("[Server M] Received buy request: %s %d shares\n", stock_name.c_str(), num_shares);
+    printf("[Server M] Received a buy request from member %s using TCP over port %d.\n",
+           client_usernames[client_sockfd].c_str(), SERVER_M_TCP_PORT);
     
     // getting current price from Server Q
     std::string quote_message = "QUOTE " + stock_name;
@@ -504,6 +466,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
         delete[] null_term_quote;
         return;
     }
+    printf("[Server M] Sent quote request to server Q.\n");
     delete[] null_term_quote;
     
     // Receive quote -from Server Q
@@ -518,6 +481,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
         send(client_sockfd, error_msg, strlen(error_msg) + 1, 0); 
         return;
     }
+    printf("[Server M] Received quote response from server Q.\n");
     
     buffer[bytes_received] = '\0';
     
@@ -551,14 +515,13 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     char* null_term_msg = new char[msg_len];
     strcpy(null_term_msg, confirm_msg.c_str());
     
-    printf("[Server M] Sending buy confirmation to client: '%s'\n", null_term_msg);
     int send_res = send(client_sockfd, null_term_msg, msg_len, 0);
     if (send_res == -1) {
         perror("send buy confirmation to client");
         delete[] null_term_msg;
         return;
     } else {
-        printf("[Server M] Successfully sent %d bytes of buy confirmation\n", send_res);
+        printf("[Server M] Sent the buy confirmation to the client.\n");
     }
     delete[] null_term_msg;
     
@@ -574,13 +537,15 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     
     buffer[bytes_received] = '\0';
     std::string confirmation(buffer);
-    printf("[Server M] Received client confirmation: %s\n", confirmation.c_str());
+    // [Removed debug print of client confirmation]
     
     if (confirmation != "yes" && confirmation != "YES" && confirmation != "y" && confirmation != "Y") {
         const char* cancel_msg = "Buy transaction cancelled";
         send(client_sockfd, cancel_msg, strlen(cancel_msg) + 1, 0); 
+        printf("[Server M] Buy denied.\n");
         return;
     }
+    printf("[Server M] Buy approved.\n");
     
     // Process the buy with Server P
     std::string username = client_usernames[client_sockfd];
@@ -595,13 +560,10 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     server_p_addr.sin_port = htons(SERVER_P_PORT);
     server_p_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
-    printf("[Server M] Sending buy request to Server P: '%s'\n", buy_message.c_str());
-    
     // Send to Server P
     size_t buy_len = buy_message.length() + 1;
     char* null_term_buy = new char[buy_len];
     strcpy(null_term_buy, buy_message.c_str());
-    
     if (sendto(udp_sockfd, null_term_buy, buy_len, 0,
               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr)) == -1) {
         perror("sendto Server P");
@@ -610,6 +572,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
         delete[] null_term_buy;
         return;
     }
+    printf("[Server M] Forwarded the buy confirmation response to Server P.\n");
     delete[] null_term_buy;
     
     // Receive confirmation from Server P
@@ -624,7 +587,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     }
     
     buffer[bytes_received] = '\0';
-    printf("[Server M] Received buy confirmation from Server P: %s\n", buffer);
+    // [Removed debug print of buy confirmation from Server P]
     
     // Advance stock price in Server Q
     std::string advance_message = "ADVANCE " + stock_name;
@@ -637,6 +600,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
               (struct sockaddr *)&server_q_addr, sizeof(server_q_addr)) == -1) {
         perror("sendto Server Q (advance)");
     } else {
+        printf("[Server M] Sent a time forward request for %s.\n", stock_name.c_str());
         // Clear any incoming response
         from_len = sizeof(from_addr);
         recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr *)&from_addr, &from_len);
@@ -652,7 +616,7 @@ void handle_buy(int client_sockfd, const std::string& stock_name, int num_shares
     if (send_res_final == -1) {
         perror("send buy result to client");
     } else {
-        printf("[Server M] Successfully sent %d bytes of buy result\n", send_res_final);
+        printf("[Server M] Forwarded the buy result to the client.\n");
     }
     delete[] null_term_resp;
 }
@@ -667,7 +631,8 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     struct sockaddr_in server_q_addr, server_p_addr;
     char buffer[BUFFER_SIZE];
     
-    printf("[Server M] Received sell request: %s %d shares\n", stock_name.c_str(), num_shares);
+    printf("[Server M] Received a sell request from member %s using TCP over port %d.\n",
+           client_usernames[client_sockfd].c_str(), SERVER_M_TCP_PORT);
     
     std::string quote_message = "QUOTE " + stock_name;
     
@@ -685,6 +650,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
+    printf("[Server M] Sent the quote request to server Q.\n");
     
     // Receive quote from Server Q
     struct sockaddr_in from_addr;
@@ -698,13 +664,22 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
+    printf("[Server M] Received quote response from server Q.\n");
     
+    // buffer[bytes_received] = '\0';
+    // printf("[Server M] Received quote response from Server Q: %s\n", buffer);
+    
+    // // If stock doesn't exist or error
+    // if (strncmp(buffer, "ERROR", 5) == 0) {
+    //     send(client_sockfd, buffer, bytes_received, 0);
+    //     return;
+    // }
+
     buffer[bytes_received] = '\0';
-    printf("[Server M] Received quote response from Server Q: %s\n", buffer);
     
-    // If stock doesn't exist or error
+    // stock doesn't exist or Error
     if (strncmp(buffer, "ERROR", 5) == 0) {
-        send(client_sockfd, buffer, bytes_received, 0);
+        send(client_sockfd, buffer, strlen(buffer) + 1, 0);
         return;
     }
     
@@ -719,7 +694,6 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     }
     
     double current_price = std::stod(parts[1]);
-    printf("[Server M] Parsed current price for %s: $%.2f\n", stock_name.c_str(), current_price);
     
     // check if user has enough shares with Server P
     std::string username = client_usernames[client_sockfd];
@@ -731,8 +705,6 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     server_p_addr.sin_port = htons(SERVER_P_PORT);
     server_p_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
-    printf("[Server M] Sending share check request to Server P: '%s'\n", check_message.c_str());
-    
     // Send to Server P
     if (sendto(udp_sockfd, check_message.c_str(), check_message.length(), 0,
               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr)) == -1) {
@@ -741,6 +713,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
+    printf("[Server M] Forwarded the sell request to server P.\n");
     
     // Receive response from Server P
     from_len = sizeof(from_addr);
@@ -754,23 +727,14 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     }
     
     buffer[bytes_received] = '\0';
-    printf("[Server M] Received share check response from Server P: %s\n", buffer);
     
     // If not enough shares
     if (strcmp(buffer, "INSUFFICIENT_SHARES") == 0) {
         const char* error_msg = "ERROR: You do not have enough shares to sell";
-        
         size_t error_len = strlen(error_msg) + 1;
         char* null_term_error = new char[error_len];
         strcpy(null_term_error, error_msg);
-        
-        printf("[Server M] Sending insufficient shares error to client: '%s'\n", null_term_error);
         int send_res = send(client_sockfd, null_term_error, error_len, 0);
-        if (send_res == -1) {
-            perror("send insufficient shares error to client");
-        } else {
-            printf("[Server M] Successfully sent %d bytes of insufficient shares error\n", send_res);
-        }
         delete[] null_term_error;
         return;
     }
@@ -786,12 +750,11 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     char* null_term_msg = new char[msg_len];
     strcpy(null_term_msg, confirm_msg.c_str());
     
-    printf("[Server M] Sending sell confirmation to client: '%s'\n", null_term_msg);
     int send_res = send(client_sockfd, null_term_msg, msg_len, 0);
     if (send_res == -1) {
         perror("send sell confirmation to client");
     } else {
-        printf("[Server M] Successfully sent %d bytes of sell confirmation\n", send_res);
+        printf("[Server M] Forwarded the sell confirmation to the client.\n");
     }
     delete[] null_term_msg;
     
@@ -807,22 +770,18 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     
     buffer[bytes_received] = '\0';
     std::string confirmation(buffer);
-    printf("[Server M] Received client confirmation: %s\n", confirmation.c_str());
+    // [Removed debug print of client confirmation]
     
     if (confirmation != "yes" && confirmation != "YES" && confirmation != "y" && confirmation != "Y") {
         const char* cancel_msg = "Sell transaction cancelled";
-        
         size_t msg_len = strlen(cancel_msg) + 1; 
         char* null_term_msg = new char[msg_len];
         strcpy(null_term_msg, cancel_msg);
-        
-        printf("[Server M] Sending cancellation message to client: '%s'\n", null_term_msg);
+        // Forward denial to Server P so it can log “Sell denied.”
+        sendto(udp_sockfd, "N", 1, 0,
+               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr));
         int send_res = send(client_sockfd, null_term_msg, msg_len, 0);
-        if (send_res == -1) {
-            perror("send cancellation to client");
-        } else {
-            printf("[Server M] Successfully sent %d bytes of cancellation message\n", send_res);
-        }
+        printf("[Server M] Forwarded the sell confirmation response to Server P.\n");
         delete[] null_term_msg;
         return;
     }
@@ -831,28 +790,23 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     std::string sell_message = "SELL " + username + " " + stock_name + " " + 
                               std::to_string(num_shares) + " " + std::to_string(current_price);
     
-    printf("[Server M] Sending sell request to Server P: '%s'\n", sell_message.c_str());
-    
     // Send to Server P 
     size_t sell_len = sell_message.length() + 1;
     char* null_term_sell = new char[sell_len];
     strcpy(null_term_sell, sell_message.c_str());
-    
     if (sendto(udp_sockfd, null_term_sell, sell_len, 0,
               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr)) == -1) {
         perror("sendto Server P");
         const char* error_msg = "ERROR: Failed to process sell";
-        
-
         size_t error_len = strlen(error_msg) + 1;
         char* null_term_error = new char[error_len];
         strcpy(null_term_error, error_msg);
-        
         send(client_sockfd, null_term_error, error_len, 0);
         delete[] null_term_error;
         delete[] null_term_sell;
         return;
     }
+    printf("[Server M] Forwarded the sell confirmation response to Server P.\n");
     delete[] null_term_sell;
     
     // Receive confirmation from Server P
@@ -873,7 +827,6 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     }
     
     buffer[bytes_received] = '\0';
-    printf("[Server M] Received sell confirmation from Server P: %s\n", buffer);
     
     // Advance stock price in Server Q
     std::string advance_message = "ADVANCE " + stock_name;
@@ -886,6 +839,7 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
               (struct sockaddr *)&server_q_addr, sizeof(server_q_addr)) == -1) {
         perror("sendto Server Q (advance)");
     } else {
+        printf("[Server M] Sent a time forward request for %s.\n", stock_name.c_str());
         // Clear any incoming response
         from_len = sizeof(from_addr);
         recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr *)&from_addr, &from_len);
@@ -901,10 +855,11 @@ void handle_sell(int client_sockfd, const std::string& stock_name, int num_share
     if (send_res_final == -1) {
         perror("send sell result to client");
     } else {
-        printf("[Server M] Successfully sent %d bytes of sell result\n", send_res_final);
+        printf("[Server M] Forwarded the sell result to the client.\n");
     }
     delete[] null_term_resp;
 }
+
 
 void handle_position(int client_sockfd) {
     if (client_usernames.find(client_sockfd) == client_usernames.end()) {
@@ -917,7 +872,8 @@ void handle_position(int client_sockfd) {
     char buffer[BUFFER_SIZE];
     
     std::string username = client_usernames[client_sockfd];
-    printf("[Server M] Received position request from %s\n", username.c_str());
+    printf("[Server M] Received a position request from Member to check %s’s gain using TCP over port %d.\n",
+           username.c_str(), SERVER_M_TCP_PORT);
     
     // First, get portfolio from Server P
     std::string portfolio_message = "PORTFOLIO " + username;
@@ -929,7 +885,6 @@ void handle_position(int client_sockfd) {
     server_p_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
     
     // Send to Server P
-    printf("[Server M] Sending portfolio request to Server P: '%s'\n", portfolio_message.c_str());
     if (sendto(udp_sockfd, portfolio_message.c_str(), portfolio_message.length(), 0,
               (struct sockaddr *)&server_p_addr, sizeof(server_p_addr)) == -1) {
         perror("sendto Server P");
@@ -937,13 +892,13 @@ void handle_position(int client_sockfd) {
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
+    printf("[Server M] Forwarded the position request to server P.\n");
     
     // Receive portfolio from Server P
     struct sockaddr_in from_addr;
     socklen_t from_len = sizeof(from_addr);
     int bytes_received;
     
-    printf("[Server M] Waiting for portfolio response from Server P...\n");
     if ((bytes_received = recvfrom(udp_sockfd, buffer, BUFFER_SIZE - 1, 0,
                                   (struct sockaddr *)&from_addr, &from_len)) == -1) {
         perror("recvfrom Server P");
@@ -951,28 +906,17 @@ void handle_position(int client_sockfd) {
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
-    
-    printf("[Server M] Received %d bytes from Server P\n", bytes_received);
-    
+    printf("[Server M] Received user’s portfolio from server P using UDP over %d\n", SERVER_M_UDP_PORT);
     buffer[bytes_received] = '\0';
     std::string portfolio(buffer);
-    
-    printf("[Server M] Received portfolio response from Server P: \n%s\n", portfolio.c_str());
-    
     // Now for each stock in portfolio, get current price from Server Q
     std::vector<std::string> portfolio_lines = split_string(portfolio, '\n');
-    
-    printf("[Server M] Split portfolio response into %zu lines\n", portfolio_lines.size());
-    
     if (portfolio_lines.empty()) {
-        printf("[Server M] Error: Portfolio response is empty\n");
         const char* error_msg = "ERROR: Empty portfolio response";
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
     }
-    
     if (portfolio_lines[0] != "PORTFOLIO") {
-        printf("[Server M] Error: First line is not PORTFOLIO, got: %s\n", portfolio_lines[0].c_str());
         const char* error_msg = "ERROR: Invalid portfolio response";
         send(client_sockfd, error_msg, strlen(error_msg), 0);
         return;
@@ -1052,7 +996,7 @@ void handle_position(int client_sockfd) {
     if (send_res == -1) {
         perror("send portfolio result to client");
     } else {
-        printf("[Server M] Successfully sent %d bytes of portfolio data\n", send_res);
+        printf("[Server M] Forwarded the gain to the client.\n");
     }
     delete[] null_term_result;
 }
