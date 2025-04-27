@@ -202,13 +202,13 @@ void process_command(int sockfd, const std::string& cmd) {
         if (is_error) {
             /* spec: "<stock> does not exist. Please try again." */
             printf("%s does not exist. Please try again.\n", specific ? parts[1].c_str() : "");
-            printf("—Start a new request—\n");
+            printf("-—Start a new request—-\n");
         } else {
             printf("%s\n", buffer);
             if (specific)
-                printf("—Start a new request—\n");
+                printf("-—Start a new request—-\n");
             else
-                printf("—--Start a new request—--\n");
+                printf("--Start a new request—-\n");
         }
         return;
     }
@@ -217,7 +217,7 @@ void process_command(int sockfd, const std::string& cmd) {
         if (bytes_received <= 0) return;
         if (strncmp(buffer, "ERROR", 5) == 0) {
             printf("[Client] Error: stock name does not exist. Please check again.\n");
-            printf("—Start a new request—\n");
+            printf("-—Start a new request—-\n");
             return;
         }
         struct sockaddr_in client_addr;
@@ -257,7 +257,7 @@ void process_command(int sockfd, const std::string& cmd) {
                 printf("[Client] Error: %s does not have enough shares of %s to sell. Please try again\n",
                        current_username.c_str(), parts[1].c_str());
             }
-            printf("—Start a new request—\n");
+            printf("-—Start a new request—-\n");
             return;
         }
         struct sockaddr_in client_addr;
